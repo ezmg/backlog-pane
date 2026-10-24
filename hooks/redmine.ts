@@ -4,8 +4,9 @@
 
 import type { Change, Fields, RemoteItem } from './sync'
 
-export type RedmineStatus = { id: number; name: string; isClosed: boolean }
-export type RedminePriority = { id: number; name: string; isDefault: boolean }
+/** A status or priority: Redmine's id, or (from a CSV export, which has none) its name. */
+export type RedmineStatus = { id: number | string; name: string; isClosed: boolean }
+export type RedminePriority = { id: number | string; name: string; isDefault: boolean }
 
 export type RedmineIssue = {
   id: number
@@ -136,7 +137,7 @@ const fold = (text: string) =>
     .trim()
     .toLowerCase()
 
-const ACTIVE = /progress|curso|progreso|doing|working|feedback|resolv|review|revision/
+const ACTIVE = /progress|curso|progreso|doing|working|feedback|resolv|resuelt|review|revision/
 const LOW = /^(low|baja?|bajo|minor)$/
 const NORMAL = /^(normal|medium|media|medio)$/
 const HIGH = /^(high|alta?|alto|urgent|urgente|immediate|inmediata|critical|critica)$/
@@ -199,7 +200,7 @@ export function redmineStatusFor(
   statusMap: Readonly<Record<string, string>>,
   redmine: RedmineStatus[],
   current?: number,
-): number | undefined {
+): number | string | undefined {
   const matches = redmine.filter(one => statusMap[String(one.id)] === status)
   return matches.find(one => one.id === current)?.id ?? matches[0]?.id
 }
@@ -209,7 +210,7 @@ export function redminePriorityFor(
   priorityMap: Readonly<Record<string, string>>,
   redmine: RedminePriority[],
   current?: number | null,
-): number | undefined {
+): number | string | undefined {
   if (!priority) return undefined
   const matches = redmine.filter(one => priorityMap[String(one.id)]?.toLowerCase() === priority.toLowerCase())
   return matches.find(one => one.id === current)?.id ?? matches[0]?.id

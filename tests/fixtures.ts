@@ -117,8 +117,24 @@ export type World = {
 /** The session's working folder in every test. */
 export const CWD = '/work/demo'
 
+const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+/** Bytes as `$.fs.read(…, { as: 'bytes' })` gives them. */
+export function toBase64(bytes: Uint8Array): string {
+  let text = ''
+  for (let i = 0; i < bytes.length; i += 3) {
+    const [a = 0, b = 0, c = 0] = [bytes[i], bytes[i + 1], bytes[i + 2]]
+    const n = (a << 16) | (b << 8) | c
+    text += BASE64[(n >> 18) & 63]! + BASE64[(n >> 12) & 63]!
+    text += i + 1 < bytes.length ? BASE64[(n >> 6) & 63]! : '='
+    text += i + 2 < bytes.length ? BASE64[n & 63]! : '='
+  }
+  return text
+}
+
 class Files {
   private readonly texts = new Map<string, string>()
+  private readonly raw = new Map<string, Uint8Array>()
   // A relative path is under CWD; `..` and `.` are resolved.
   private static key(path: string) {
     const slashed = path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '')
@@ -132,6 +148,15 @@ class Files {
   }
   get(path: string) {
     return this.texts.get(Files.key(path))
+  }
+  /** A file's bytes: those set with setBytes, else its text in UTF-8. */
+  bytes(path: string) {
+    const text = this.get(path)
+    return this.raw.get(Files.key(path)) ?? (text === undefined ? undefined : new TextEncoder().encode(text))
+  }
+  setBytes(path: string, bytes: Uint8Array) {
+    this.raw.set(Files.key(path), bytes)
+    this.texts.set(Files.key(path), '')
   }
   set(path: string, text: string) {
     this.texts.set(Files.key(path), text)
@@ -221,6 +246,11 @@ export function world(on: On, options: World = {}) {
     return { value: undefined }
   })
   on('fs.read', (_, e) => {
+    if (e.as === 'bytes') {
+      const bytes = files.bytes(e.path)
+      if (bytes === undefined) throw new Error(`ENOENT: ${e.path}`)
+      return { value: { base64: toBase64(bytes) } }
+    }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }
