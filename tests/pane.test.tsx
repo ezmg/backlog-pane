@@ -30,8 +30,8 @@ for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
 
     expect(runs).toContainEqual(['task', 'view', 'BL-1', '--json'])
     expect(await ui.find({ type: 'Markdown', text: 'Parse the **stream**.' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '[x] 1. Handles chunks' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '[ ] 2. Has tests' })).toBeDefined()
+    expect((await ui.find({ key: 'criterion-check-1' }))?.text).toBe('[x] 1. Handles chunks')
+    expect((await ui.find({ key: 'criterion-check-2' }))?.text).toBe('[ ] 2. Has tests')
     expect(await ui.find({ type: 'Markdown', text: /2\. Split/ })).toBeDefined()
     await ui.press({ key: 'back' })
     expect(await ui.find({ type: 'Text', text: 'Parse the **stream**.' })).toBe(undefined)
@@ -99,7 +99,7 @@ for (const surface of ['vscode', 'mobile'] as const) {
     expect((await ui.find({ key: 'task:BL-1' }))?.text).not.toContain('!')
     await ui.press({ key: 'task:BL-2' })
     expect((await ui.find({ type: 'Text', text: 'To Do' }))?.props.color).toBe('suggestion')
-    expect((await ui.find({ type: 'Text', text: /! Add login/ }))).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: '! high priority' }))?.props.color).toBe('error')
     await ui.unmount()
   })
 }

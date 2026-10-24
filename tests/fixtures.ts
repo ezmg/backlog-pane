@@ -72,6 +72,8 @@ export type World = {
   watch?: { stdout?: string[]; stderr?: string; code?: number }
   list?: ProcessRunResult
   create?: ProcessRunResult
+  // What every `backlog task edit` answers.
+  edit?: ProcessRunResult
   // What `backlog config get <key>` prints, by key.
   config?: Record<string, ProcessRunResult>
   env?: Record<string, string>
@@ -145,9 +147,10 @@ export function world(on: On, options: World = {}) {
     }
     if (argv[0] === 'task' && argv[1] === 'view') {
       const summary = TASKS.find(one => one.id === argv[2])
-      const view = summary?.id === VIEW.task.id ? VIEW : { ...VIEW, task: { ...VIEW.task, ...summary } }
+      const view = summary?.id === VIEW.task.id ? VIEW : { ...VIEW, task: { ...VIEW.task, priority: null, ...summary } }
       return { value: ok(JSON.stringify(view, null, 2)) }
     }
+    if (argv[0] === 'task' && argv[1] === 'edit' && options.edit) return { value: options.edit }
     if (argv[0] === 'task' && argv[1] === 'create') return { value: options.create ?? ok('Created task BL-4\nFile: x.md') }
     return { value: ok('Updated task') }
   })

@@ -9,9 +9,12 @@ import {
   errorLine,
   groupTasks,
   isHighPriority,
+  parseList,
+  parsePriorities,
   parseStatuses,
   readTaskList,
   readTaskView,
+  rewriteCriteria,
   statusColors,
   summarize,
 } from '../hooks/cli'
@@ -80,6 +83,10 @@ describe('parsing', () => {
   test('reads statuses, created ids and errors', async () => {
     expect(parseStatuses('To Do, In Progress, Done\n')).toEqual(['To Do', 'In Progress', 'Done'])
     expect(parseStatuses('')).toEqual(['To Do', 'In Progress', 'Done'])
+    expect(parsePriorities('high, medium, low\n')).toEqual(['high', 'medium', 'low'])
+    expect(parsePriorities('')).toEqual(['high', 'medium', 'low'])
+    expect(parsePriorities('undefined\n')).toEqual(['high', 'medium', 'low'])
+    expect(parseList('[ "P1", \'P2\' ]', [])).toEqual(['P1', 'P2'])
     expect(createdId('Created task BL-12\nFile: x.md')).toBe('BL-12')
     expect(classify('No Backlog.md project found. Run `backlog init` to initialize.')).toBe('not-initialized')
     expect(classify('boom')).toBe('failed')
@@ -92,6 +99,31 @@ describe('commands', () => {
     expect(args.setStatus('BL-7', 'In Progress')).toEqual(['task', 'edit', 'BL-7', '--status', 'In Progress'])
     expect(args.create('Fix "login" & co')).toEqual(['task', 'create', 'Fix "login" & co'])
     expect(args.watch()).toEqual(['task', 'list', '--json', '--watch'])
+  })
+
+  test('the editing commands, as verified against backlog.md 1.55.3', async () => {
+    expect(args.setTitle('BL-7', 'New "name"')).toEqual(['task', 'edit', 'BL-7', '-t', 'New "name"'])
+    expect(args.setPriority('BL-7', 'high')).toEqual(['task', 'edit', 'BL-7', '--priority', 'high'])
+    expect(args.checkCriterion('BL-7', 2)).toEqual(['task', 'edit', 'BL-7', '--check-ac', '2'])
+    expect(args.uncheckCriterion('BL-7', 2)).toEqual(['task', 'edit', 'BL-7', '--uncheck-ac', '2'])
+    expect(args.addCriterion('BL-7', 'a, b\nc')).toEqual(['task', 'edit', 'BL-7', '--ac', 'a, b\nc'])
+    expect(args.removeCriterion('BL-7', 3)).toEqual(['task', 'edit', 'BL-7', '--remove-ac', '3'])
+    expect(args.setCriteria('BL-7', ['one', 'two'])).toEqual([
+      'task', 'edit', 'BL-7', '--acceptance-criteria', 'one', '--acceptance-criteria', 'two',
+    ])
+    expect(args.priorities()).toEqual(['config', 'get', 'priorities'])
+  })
+
+  test('rewriting one criterion keeps the others in order', async () => {
+    const criteria = [
+      { index: 1, text: 'one', checked: true },
+      { index: 2, text: 'two', checked: false },
+    ]
+    expect(rewriteCriteria(criteria, 2, ' deux ')).toEqual(['one', 'deux'])
+    expect(rewriteCriteria(criteria, 1, 'uno\nmás')).toEqual(['uno\nmás', 'two'])
+    expect(rewriteCriteria(criteria, 2, 'two')).toBe(undefined)
+    expect(rewriteCriteria(criteria, 2, '  ')).toBe(undefined)
+    expect(rewriteCriteria(criteria, 9, 'x')).toBe(undefined)
   })
 
   test('candidates: the configured path alone, else PATH then the Windows globals', async () => {

@@ -8,6 +8,7 @@ import type { Checklist, TaskDetail, TaskSummary } from '../types'
 import type { Strings } from './i18n'
 
 export const DEFAULT_STATUSES = ['To Do', 'In Progress', 'Done']
+export const DEFAULT_PRIORITIES = ['high', 'medium', 'low']
 
 export const args = {
   version: () => ['--version'],
@@ -17,6 +18,20 @@ export const args = {
   view: (id: string) => ['task', 'view', id, '--json'],
   setStatus: (id: string, status: string) => ['task', 'edit', id, '--status', status],
   create: (title: string) => ['task', 'create', title],
+  priorities: () => ['config', 'get', 'priorities'],
+  setTitle: (id: string, title: string) => ['task', 'edit', id, '-t', title],
+  setPriority: (id: string, priority: string) => ['task', 'edit', id, '--priority', priority],
+  checkCriterion: (id: string, index: number) => ['task', 'edit', id, '--check-ac', String(index)],
+  uncheckCriterion: (id: string, index: number) => ['task', 'edit', id, '--uncheck-ac', String(index)],
+  addCriterion: (id: string, text: string) => ['task', 'edit', id, '--ac', text],
+  removeCriterion: (id: string, index: number) => ['task', 'edit', id, '--remove-ac', String(index)],
+  /** Replaces every criterion, in order; a text left unchanged keeps its tick. */
+  setCriteria: (id: string, texts: string[]) => [
+    'task',
+    'edit',
+    id,
+    ...texts.flatMap(text => ['--acceptance-criteria', text]),
+  ],
 }
 
 /**
@@ -61,15 +76,35 @@ export function errorLine(stderr: string, fallback: string): string {
   return line ?? fallback
 }
 
-/** `backlog config get statuses` prints `To Do, In Progress, Done`. */
-export function parseStatuses(stdout: string): string[] {
+/**
+ * A list `backlog config get` prints: `To Do, In Progress, Done`, or with
+ * brackets and quotes around it; `fallback` when it prints none.
+ */
+export function parseList(stdout: string, fallback: string[]): string[] {
   const list = stdout
     .trim()
     .replace(/^\[|\]$/g, '')
     .split(',')
-    .map(one => one.trim())
-    .filter(one => one !== '')
-  return list.length > 0 ? list : DEFAULT_STATUSES
+    .map(one => one.trim().replace(/^["']|["']$/g, '').trim())
+    .filter(one => one !== '' && one !== 'undefined' && one !== 'null')
+  return list.length > 0 ? list : fallback
+}
+
+/** `backlog config get statuses` prints `To Do, In Progress, Done`. */
+export const parseStatuses = (stdout: string) => parseList(stdout, DEFAULT_STATUSES)
+
+/** `backlog config get priorities`; High, Medium, Low when it prints none. */
+export const parsePriorities = (stdout: string) => parseList(stdout, DEFAULT_PRIORITIES)
+
+/**
+ * The criteria's texts with the one at `index` (1-based, as the CLI counts)
+ * replaced, for `args.setCriteria`; undefined when nothing would change.
+ */
+export function rewriteCriteria(criteria: Checklist[], index: number, text: string): string[] | undefined {
+  const next = text.trim()
+  const at = criteria.findIndex(item => item.index === index)
+  if (at === -1 || next === '' || criteria[at]?.text === next) return undefined
+  return criteria.map((item, i) => (i === at ? next : item.text))
 }
 
 /** The id `backlog task create` printed (`Created task TASK-3`). */

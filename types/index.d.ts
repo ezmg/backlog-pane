@@ -55,10 +55,12 @@ declare module 'claude-code' {
       phase: Phase
       tasks: TaskSummary[]
       statuses: string[]
+      priorities: string[]
       selectedId: string | null
       detail: TaskDetail | null
       isDoneOpen: boolean
       notice: string | null
+      editing: string | null
       isCreating: boolean
       isBoardFailed: boolean
     }

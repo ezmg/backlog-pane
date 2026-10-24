@@ -19,9 +19,11 @@ import {
   isHighPriority,
   isRecord,
   neighbours,
+  parsePriorities,
   parseStatuses,
   readTaskList,
   readTaskView,
+  rewriteCriteria,
   summarize,
 } from './cli'
 import { detectLanguage, strings } from './i18n'
@@ -36,10 +38,14 @@ const MAX_ATTEMPTS = 5
 const phase = atom({ plugin: 'backlog-pane', key: 'phase' } as const, { kind: 'idle' } as Phase)
 const tasks = atom({ plugin: 'backlog-pane', key: 'tasks' } as const, [] as TaskSummary[])
 const statuses = atom({ plugin: 'backlog-pane', key: 'statuses' } as const, [] as string[])
+const priorities = atom({ plugin: 'backlog-pane', key: 'priorities' } as const, [] as string[])
 const selectedId = atom({ plugin: 'backlog-pane', key: 'selectedId' } as const, null as string | null)
 const detail = atom({ plugin: 'backlog-pane', key: 'detail' } as const, null as TaskDetail | null)
 const isDoneOpen = atom({ plugin: 'backlog-pane', key: 'isDoneOpen' } as const, false)
 const notice = atom({ plugin: 'backlog-pane', key: 'notice' } as const, null as string | null)
+// What the task view is editing: `title`, `description`, `plan`, a criterion
+// (`criterion:<index>`), or the criterion awaiting a delete (`remove:<index>`).
+const editing = atom({ plugin: 'backlog-pane', key: 'editing' } as const, null as string | null)
 const isCreating = atom({ plugin: 'backlog-pane', key: 'isCreating' } as const, false)
 // Set when the board's Client failed on a surface: the list stands in.
 const isBoardFailed = atom({ plugin: 'backlog-pane', key: 'isBoardFailed' } as const, false)
@@ -126,6 +132,8 @@ async function backlog($: Engine, argv: string[]): Promise<Run> {
 async function loadStatuses($: Engine) {
   const run = await backlog($, args.statuses())
   if (run.ok) await update($, statuses, () => parseStatuses(run.stdout))
+  const listed = await backlog($, args.priorities())
+  await update($, priorities, () => parsePriorities(listed.ok ? listed.stdout : ''))
 }
 
 async function loadDetail($: Engine, id: string) {
@@ -233,7 +241,76 @@ async function select($: Engine, id: string | null) {
   await update($, selectedId, () => id)
   await update($, detail, () => null)
   await update($, notice, () => null)
+  await update($, editing, () => null)
   if (id) await loadDetail($, id)
+}
+
+/**
+ * Runs `task edit` commands for `id` one after another, stopping at the
+ * first that fails; then says how it went and reads the task again.
+ */
+async function edit($: Engine, id: string, commands: string[][]): Promise<boolean> {
+  const t = await text($)
+  for (const argv of commands) {
+    const run = await backlog($, argv)
+    if (!run.ok) {
+      await update($, notice, () => errorLine(run.stderr, t.couldNotUpdate(id)))
+      return false
+    }
+  }
+  await update($, notice, () => t.updated(id))
+  await update($, editing, () => null)
+  if ((await read($, selectedId)) === id) await loadDetail($, id)
+  return true
+}
+
+async function rename($: Engine, id: string, title: string) {
+  const name = title.trim()
+  const shown = (await read($, detail))?.title
+  if (!name || name === shown) return
+  if (await edit($, id, [args.setTitle(id, name)])) {
+    await update($, tasks, list => list.map(task => (task.id === id ? { ...task, title: name } : task)))
+  }
+}
+
+async function setPriority($: Engine, id: string, priority: string) {
+  const shown = (await read($, detail))?.priority
+  if (!priority || priority.toLowerCase() === shown?.toLowerCase()) return
+  if (await edit($, id, [args.setPriority(id, priority)])) {
+    await update($, tasks, list => list.map(task => (task.id === id ? { ...task, priority } : task)))
+  }
+}
+
+async function toggleCriterion($: Engine, id: string, index: number, isChecked: boolean) {
+  await edit($, id, [isChecked ? args.uncheckCriterion(id, index) : args.checkCriterion(id, index)])
+}
+
+async function addCriterion($: Engine, id: string, value: string) {
+  const criterion = value.trim()
+  if (criterion) await edit($, id, [args.addCriterion(id, criterion)])
+}
+
+async function removeCriterion($: Engine, id: string, index: number) {
+  await edit($, id, [args.removeCriterion(id, index)])
+}
+
+/**
+ * Edits one criterion by writing the whole list again, in order: the CLI
+ * keeps the ticks of the texts that did not change, so a ticked criterion
+ * whose text changed is ticked again by a second command.
+ */
+async function rewriteCriterion($: Engine, id: string, index: number, value: string) {
+  const criteria = (await read($, detail))?.acceptanceCriteria ?? []
+  const texts = rewriteCriteria(criteria, index, value)
+  if (!texts) {
+    await update($, editing, () => null)
+    return
+  }
+  const position = criteria.findIndex(item => item.index === index) + 1
+  const wasChecked = criteria[position - 1]?.checked === true
+  const commands = [args.setCriteria(id, texts)]
+  if (wasChecked) commands.push(args.checkCriterion(id, position))
+  await edit($, id, commands)
 }
 
 async function setStatus($: Engine, id: string, status: string) {
@@ -403,8 +480,100 @@ export const register: Register = (on, options) => {
       const status = task?.status ?? summary?.status ?? ''
       const choices = order.includes(status) || !status ? order : [...order, status]
       const color = groupTasks([], choices, 0).find(group => group.status === status)?.color
-      const isHigh = isHighPriority(task?.priority ?? summary?.priority)
+      const title = task?.title ?? summary?.title ?? id
+      const priority = task?.priority ?? summary?.priority ?? null
+      const isHigh = isHighPriority(priority)
       const around = neighbours(choices, status)
+      const now = await read($, editing)
+      const stopEditing = () => update($, editing, () => null)
+
+      // Priorities: the configured ones, the task's own if the config lacks
+      // it. A priority once set cannot be cleared through the CLI, so "None"
+      // is offered only while the task has none.
+      const levels = await read($, priorities)
+      const current = levels.find(one => one.toLowerCase() === priority?.toLowerCase()) ?? priority
+      const priorityOptions = [
+        ...(current ? [] : [{ value: '', label: t.noPriority }]),
+        ...(current && !levels.includes(current) ? [current] : []).concat(levels).map(one => ({
+          value: one,
+          label: t.priorityName[one.toLowerCase()] ?? one,
+        })),
+      ]
+
+      const criteria = task ? (
+        <Box flexDirection="column">
+          <Text bold>{t.criteria}</Text>
+          {task.acceptanceCriteria.length === 0 ? <Text dimColor>{t.none}</Text> : null}
+          {task.acceptanceCriteria.map(item => {
+            if (Input && now === `criterion:${item.index}`) {
+              return (
+                <Box flexDirection="row" gap={1}>
+                  <Input
+                    key={`criterion-text-${item.index}`}
+                    autoFocus
+                    value={item.text}
+                    submitLabel={t.save}
+                    onSubmit={value => rewriteCriterion($, id, item.index, value)}
+                  />
+                  <Button key="criterion-cancel" label={t.cancel} onPress={stopEditing} />
+                </Box>
+              )
+            }
+            if (now === `remove:${item.index}`) {
+              return (
+                <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                  <Text>{t.confirmRemove(item.index)}</Text>
+                  <Button
+                    key={`criterion-remove-yes-${item.index}`}
+                    variant="primary"
+                    label={t.remove}
+                    onPress={() => removeCriterion($, id, item.index)}
+                  />
+                  <Button key="criterion-remove-no" label={t.keep} onPress={stopEditing} />
+                </Box>
+              )
+            }
+            return (
+              <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                <Button
+                  key={`criterion-check-${item.index}`}
+                  plain
+                  dimColor={item.checked}
+                  onPress={() => toggleCriterion($, id, item.index, item.checked)}
+                >
+                  {item.checked ? '[x]' : '[ ]'} {item.index}. {item.text}
+                </Button>
+                {Input ? (
+                  <Button
+                    key={`criterion-edit-${item.index}`}
+                    plain
+                    dimColor
+                    label={t.edit}
+                    onPress={() => update($, editing, () => `criterion:${item.index}`)}
+                  />
+                ) : null}
+                <Button
+                  key={`criterion-remove-${item.index}`}
+                  plain
+                  dimColor
+                  label={t.remove}
+                  onPress={() => update($, editing, () => `remove:${item.index}`)}
+                />
+              </Box>
+            )
+          })}
+          {Input ? (
+            <Input
+              key="criterion-new"
+              placeholder={t.newCriterion}
+              submitLabel={t.add}
+              value=""
+              onSubmit={value => addCriterion($, id, value)}
+            />
+          ) : null}
+        </Box>
+      ) : null
+
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" gap={1}>
@@ -412,10 +581,14 @@ export const register: Register = (on, options) => {
             <Text dimColor>{id}</Text>
             <Text color={color}>{status}</Text>
           </Box>
-          <Text bold>
-            {isHigh ? <Text color="error">! </Text> : ''}
-            {task?.title ?? summary?.title ?? id}
-          </Text>
+          {Input ? (
+            <Input key="title" label={t.title} value={title} submitLabel={t.save} onSubmit={value => rename($, id, value)} />
+          ) : (
+            <Text bold>
+              {isHigh ? <Text color="error">! </Text> : ''}
+              {title}
+            </Text>
+          )}
           {Select ? (
             <Select
               key="status"
@@ -451,21 +624,37 @@ export const register: Register = (on, options) => {
               ) : null}
             </Box>
           ) : null}
+          <Box flexDirection="row" flexWrap="wrap" gap={1}>
+            {Select ? (
+              <Select
+                key="priority"
+                label={t.priority}
+                value={current ?? ''}
+                options={priorityOptions}
+                onSelect={value => setPriority($, id, value)}
+              />
+            ) : (
+              <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                <Text>{t.priority}:</Text>
+                {priorityOptions
+                  .filter(option => option.value !== '')
+                  .map((option, i) => (
+                    <Button
+                      key={`priority-${i}`}
+                      label={option.label}
+                      variant={option.value === current ? 'primary' : 'secondary'}
+                      onPress={() => setPriority($, id, option.value)}
+                    />
+                  ))}
+              </Box>
+            )}
+            {isHigh ? <Text color="error">! {t.highPriority}</Text> : null}
+          </Box>
           <Button key="work" variant="primary" label={t.work} onPress={() => work($, id)} />
           {footer}
           {!task ? <Text dimColor>{t.loadingDetails}</Text> : null}
           {task ? section(t.description, task.description) : null}
-          {task ? (
-            <Box flexDirection="column">
-              <Text bold>{t.criteria}</Text>
-              {task.acceptanceCriteria.length === 0 ? <Text dimColor>{t.none}</Text> : null}
-              {task.acceptanceCriteria.map(item => (
-                <Text dimColor={item.checked}>
-                  {item.checked ? '[x]' : '[ ]'} {item.index}. {item.text}
-                </Text>
-              ))}
-            </Box>
-          ) : null}
+          {criteria}
           {task ? section(t.plan, task.implementationPlan) : null}
         </Box>
       )
