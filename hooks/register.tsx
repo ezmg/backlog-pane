@@ -14,13 +14,16 @@ import {
   candidates,
   classify,
   createdId,
+  editorFile,
   errorLine,
   groupTasks,
+  isAtLeast,
   isHighPriority,
   isRecord,
   neighbours,
   parsePriorities,
   parseStatuses,
+  pickEditor,
   readTaskList,
   readTaskView,
   rewriteCriteria,
@@ -34,6 +37,13 @@ type Engine = EngineInterface
 const PANE = 'backlog'
 const COMMAND = 'backlog'
 const MAX_ATTEMPTS = 5
+// The release whose Input took `rows`: an older engine refuses the whole
+// tree that names it, so the external editor stands in there.
+const MULTILINE_SINCE = '2.1.301'
+// How long the external editor may stay open: $.process.run's longest.
+const EDITOR_TIMEOUT_MS = 600_000
+
+type LongField = 'description' | 'plan'
 
 const phase = atom({ plugin: 'backlog-pane', key: 'phase' } as const, { kind: 'idle' } as Phase)
 const tasks = atom({ plugin: 'backlog-pane', key: 'tasks' } as const, [] as TaskSummary[])
@@ -58,6 +68,8 @@ let doneLimit = 5
 let languageOption: unknown = 'auto'
 // The language shown, detected once per load.
 let language: Language | null = null
+// Whether this engine's Input takes `rows`, asked once per load.
+let multiline: boolean | null = null
 // The executable that answered `--version`; found again after a reload.
 let bin: string | null = null
 // The watch loop in progress, if any.
@@ -95,6 +107,18 @@ async function text($: Engine): Promise<Strings> {
     })
   }
   return strings(language)
+}
+
+async function hasMultiline($: Engine): Promise<boolean> {
+  if (multiline === null) {
+    try {
+      const engine = await $.session.version()
+      multiline = isAtLeast(engine.base ?? engine.version, MULTILINE_SINCE)
+    } catch {
+      multiline = false
+    }
+  }
+  return multiline
 }
 
 async function findBin($: Engine): Promise<string | null> {
@@ -281,6 +305,76 @@ async function setPriority($: Engine, id: string, priority: string) {
   }
 }
 
+/** Saves a description or plan typed in the inline field. */
+async function saveLong($: Engine, id: string, field: LongField, value: string) {
+  const task = await read($, detail)
+  const before = (field === 'description' ? task?.description : task?.implementationPlan) ?? ''
+  if (value.trimEnd() === before.trimEnd()) {
+    const t = await text($)
+    await update($, notice, () => t.noChange)
+    await update($, editing, () => null)
+    return
+  }
+  await edit($, id, [field === 'description' ? args.setDescription(id, value) : args.setPlan(id, value)])
+}
+
+async function findEditor($: Engine): Promise<string[] | undefined> {
+  const run = await backlog($, args.defaultEditor())
+  return pickEditor({
+    configured: run.ok ? run.stdout : undefined,
+    visual: await $.env.get('VISUAL'),
+    editor: await $.env.get('EDITOR'),
+    os: await $.env.get('OS'),
+  })
+}
+
+/**
+ * Hands a description or plan to the person's own editor: writes it to a
+ * temp file, runs the editor on it and waits for it to exit (so the editor
+ * must block, as `code --wait` does), then reads it back and saves it.
+ */
+async function openInEditor($: Engine, id: string, field: LongField) {
+  const t = await text($)
+  const editor = await findEditor($)
+  if (!editor) {
+    await update($, notice, () => t.noEditor)
+    return
+  }
+  const task = await read($, detail)
+  const before = (field === 'description' ? task?.description : task?.implementationPlan) ?? ''
+  const path = editorFile(
+    {
+      tmpdir: await $.env.get('TMPDIR'),
+      temp: await $.env.get('TEMP'),
+      tmp: await $.env.get('TMP'),
+      userProfile: await $.env.get('USERPROFILE'),
+      os: await $.env.get('OS'),
+    },
+    id,
+    field,
+  )
+  let after: string
+  try {
+    await $.fs.write(path, before)
+    await update($, notice, () => t.editorWaiting)
+    const done = await $.process.run([...editor, path], { timeoutMs: EDITOR_TIMEOUT_MS })
+    if (done.exitCode !== 0) {
+      await update($, notice, () => t.editorFailed(errorLine(done.stderr, `exit code ${done.exitCode}`)))
+      return
+    }
+    after = (await $.fs.read(path)).replace(/\r\n/g, '\n')
+  } catch (error) {
+    await update($, notice, () => t.editorFailed(String(error)))
+    return
+  }
+  if (after.trimEnd() === before.trimEnd()) {
+    await update($, notice, () => t.noChange)
+    return
+  }
+  const value = after.replace(/\n+$/, '')
+  await edit($, id, [field === 'description' ? args.setDescription(id, value) : args.setPlan(id, value)])
+}
+
 async function toggleCriterion($: Engine, id: string, index: number, isChecked: boolean) {
   await edit($, id, [isChecked ? args.uncheckCriterion(id, index) : args.checkCriterion(id, index)])
 }
@@ -431,12 +525,60 @@ export const register: Register = (on, options) => {
     const now = await read($, phase)
     const message = await read($, notice)
 
-    const section = (title: string, body: string | null) => (
-      <Box flexDirection="column">
-        <Text bold>{title}</Text>
-        {body?.trim() ? <Markdown text={body} /> : <Text dimColor>{t.none}</Text>}
-      </Box>
-    )
+    const isMultiline = Input ? await hasMultiline($) : false
+    const shownBody = (body: string | null) =>
+      body?.trim() ? <Markdown text={body} /> : <Text dimColor>{t.none}</Text>
+    // A description or plan, with a way to edit it where the surface has
+    // fields: inline from 2.1.301, else in the person's editor.
+    const section = (title: string, body: string | null, id: string, field: LongField, now: string | null) => {
+      if (!Input) {
+        return (
+          <Box flexDirection="column">
+            <Text bold>{title}</Text>
+            {shownBody(body)}
+          </Box>
+        )
+      }
+      if (!isMultiline) {
+        return (
+          <Box flexDirection="column">
+            <Box flexDirection="row" gap={1}>
+              <Text bold>{title}</Text>
+              <Button key={`editor-${field}`} plain dimColor label={t.openInEditor} onPress={() => openInEditor($, id, field)} />
+            </Box>
+            {shownBody(body)}
+          </Box>
+        )
+      }
+      if (now === field) {
+        return (
+          <Box flexDirection="column">
+            <Text bold>{title}</Text>
+            <Input
+              key={`${field}-input`}
+              rows={8}
+              autoFocus
+              value={body ?? ''}
+              submitLabel={t.save}
+              onSubmit={value => saveLong($, id, field, value)}
+            />
+            <Box flexDirection="row" gap={1}>
+              <Text dimColor>{t.multilineHint}</Text>
+              <Button key={`${field}-cancel`} label={t.cancel} onPress={() => update($, editing, () => null)} />
+            </Box>
+          </Box>
+        )
+      }
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            <Text bold>{title}</Text>
+            <Button key={`edit-${field}`} plain dimColor label={t.edit} onPress={() => update($, editing, () => field)} />
+          </Box>
+          {shownBody(body)}
+        </Box>
+      )
+    }
     const retryButton = <Button key="retry" variant="primary" label={t.retry} onPress={() => retry($)} />
     const footer = message ? <Text dimColor>{message}</Text> : null
 
@@ -653,9 +795,10 @@ export const register: Register = (on, options) => {
           <Button key="work" variant="primary" label={t.work} onPress={() => work($, id)} />
           {footer}
           {!task ? <Text dimColor>{t.loadingDetails}</Text> : null}
-          {task ? section(t.description, task.description) : null}
+          {task ? section(t.description, task.description, id, 'description', now) : null}
           {criteria}
-          {task ? section(t.plan, task.implementationPlan) : null}
+          {task ? section(t.plan, task.implementationPlan, id, 'plan', now) : null}
+          {task && Input && !isMultiline ? <Markdown text={t.editorHint} /> : null}
         </Box>
       )
     }

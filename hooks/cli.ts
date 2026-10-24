@@ -19,6 +19,9 @@ export const args = {
   setStatus: (id: string, status: string) => ['task', 'edit', id, '--status', status],
   create: (title: string) => ['task', 'create', title],
   priorities: () => ['config', 'get', 'priorities'],
+  defaultEditor: () => ['config', 'get', 'defaultEditor'],
+  setDescription: (id: string, text: string) => ['task', 'edit', id, '-d', text],
+  setPlan: (id: string, text: string) => ['task', 'edit', id, '--plan', text],
   setTitle: (id: string, title: string) => ['task', 'edit', id, '-t', title],
   setPriority: (id: string, priority: string) => ['task', 'edit', id, '--priority', priority],
   checkCriterion: (id: string, index: number) => ['task', 'edit', id, '--check-ac', String(index)],
@@ -60,6 +63,72 @@ export function candidates(env: {
   if (env.userProfile) found.push(`${env.userProfile}\\.bun\\bin\\backlog.exe`)
   found.push('backlog.exe')
   return found
+}
+
+/** Whether a version (`2.1.301`, `2.1.301-dev.…`) is at least `minimum`. */
+export function isAtLeast(version: string | undefined, minimum: string): boolean {
+  const parse = (text: string | undefined) => /^(\d+)\.(\d+)\.(\d+)/.exec(text?.trim() ?? '')?.slice(1).map(Number)
+  const have = parse(version)
+  const need = parse(minimum)
+  if (!have || !need) return false
+  for (let i = 0; i < 3; i++) {
+    const a = have[i] ?? 0
+    const b = need[i] ?? 0
+    if (a !== b) return a > b
+  }
+  return true
+}
+
+/**
+ * Splits an editor command as a shell would split its words, quotes kept
+ * together: `code --wait`, `"C:\Program Files\Editor\editor.exe" -w`.
+ */
+export function splitCommand(command: string): string[] {
+  const words: string[] = []
+  let word = ''
+  let quote: string | null = null
+  let isWord = false
+  for (const c of command.trim()) {
+    if (quote) {
+      if (c === quote) quote = null
+      else word += c
+    } else if (c === '"' || c === "'") {
+      quote = c
+      isWord = true
+    } else if (/\s/.test(c)) {
+      if (isWord) words.push(word)
+      word = ''
+      isWord = false
+    } else {
+      word += c
+      isWord = true
+    }
+  }
+  if (isWord) words.push(word)
+  return words
+}
+
+/**
+ * The editor to run, as an argument vector: Backlog.md's `defaultEditor`,
+ * else VISUAL, else EDITOR, else Notepad on Windows; undefined when none.
+ */
+export function pickEditor(env: { configured?: string; visual?: string; editor?: string; os?: string }): string[] | undefined {
+  for (const value of [env.configured, env.visual, env.editor]) {
+    const text = value?.trim() ?? ''
+    if (text === '' || text === 'undefined' || text === 'null') continue
+    const argv = splitCommand(text)
+    if (argv.length > 0) return argv
+  }
+  return env.os === 'Windows_NT' ? ['notepad'] : undefined
+}
+
+/** Where the text goes while the editor has it: the temp folder. */
+export function editorFile(env: { tmpdir?: string; temp?: string; tmp?: string; userProfile?: string; os?: string }, id: string, field: string): string {
+  const isWindows = env.os === 'Windows_NT'
+  const fallback = isWindows ? (env.userProfile ? `${env.userProfile}\\AppData\\Local\\Temp` : 'C:\\Windows\\Temp') : '/tmp'
+  const folder = (env.tmpdir || env.temp || env.tmp || fallback).replace(/[\\/]+$/, '')
+  const name = `backlog-pane-${id.replace(/[^\w.-]/g, '_')}-${field}.md`
+  return `${folder}${isWindows ? '\\' : '/'}${name}`
 }
 
 /** Why a backlog command failed, from its stderr. */

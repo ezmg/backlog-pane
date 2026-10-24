@@ -126,7 +126,8 @@ export function world(on: On, options: World = {}) {
       // The external editor: the file is its last argument.
       editorRuns.push({ argv: e.argv, timeoutMs: e.init?.timeoutMs })
       const editor = options.editor ?? {}
-      if (editor.throws) throw new Error(editor.throws)
+      // The call rejects, as $.process.run does at its timeout.
+      if (editor.throws) return { deny: editor.throws }
       const path = e.argv[e.argv.length - 1] ?? ''
       if (editor.writes !== undefined) files.set(path, editor.writes)
       return { value: editor.result ?? ok('') }

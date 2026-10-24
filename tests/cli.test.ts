@@ -6,15 +6,19 @@ import {
   candidates,
   classify,
   createdId,
+  editorFile,
   errorLine,
   groupTasks,
+  isAtLeast,
   isHighPriority,
   parseList,
   parsePriorities,
   parseStatuses,
+  pickEditor,
   readTaskList,
   readTaskView,
   rewriteCriteria,
+  splitCommand,
   statusColors,
   summarize,
 } from '../hooks/cli'
@@ -196,5 +200,44 @@ describe('colours', () => {
     expect(isHighPriority(' High ')).toBe(true)
     expect(isHighPriority('medium')).toBe(false)
     expect(isHighPriority(null)).toBe(false)
+  })
+})
+
+describe('long text', () => {
+  test('versions compare by release', async () => {
+    expect(isAtLeast('2.1.301', '2.1.301')).toBe(true)
+    expect(isAtLeast('2.1.310', '2.1.301')).toBe(true)
+    expect(isAtLeast('2.2.0', '2.1.301')).toBe(true)
+    expect(isAtLeast('2.1.296', '2.1.301')).toBe(false)
+    expect(isAtLeast('2.1.301-dev.20260920.t101500.sha1a2b3c4', '2.1.301')).toBe(true)
+    expect(isAtLeast('dev', '2.1.301')).toBe(false)
+    expect(isAtLeast(undefined, '2.1.301')).toBe(false)
+  })
+
+  test('editor commands split like shell words', async () => {
+    expect(splitCommand('code --wait')).toEqual(['code', '--wait'])
+    expect(splitCommand('  "C:\\Program Files\\Code\\Code.exe"  --wait ')).toEqual([
+      'C:\\Program Files\\Code\\Code.exe',
+      '--wait',
+    ])
+    expect(splitCommand("emacsclient -a '' -c")).toEqual(['emacsclient', '-a', '', '-c'])
+    expect(splitCommand('')).toEqual([])
+  })
+
+  test('the editor: defaultEditor, VISUAL, EDITOR, then Notepad on Windows', async () => {
+    expect(pickEditor({ configured: 'code --wait\n', visual: 'vim', editor: 'nano' })).toEqual(['code', '--wait'])
+    expect(pickEditor({ configured: 'undefined', visual: 'vim', editor: 'nano' })).toEqual(['vim'])
+    expect(pickEditor({ configured: '', editor: 'nano' })).toEqual(['nano'])
+    expect(pickEditor({ os: 'Windows_NT' })).toEqual(['notepad'])
+    expect(pickEditor({ os: 'Darwin' })).toBe(undefined)
+  })
+
+  test('the temp file, by platform', async () => {
+    expect(editorFile({ tmpdir: '/var/folders/x/T/' }, 'BL-7', 'plan')).toBe('/var/folders/x/T/backlog-pane-BL-7-plan.md')
+    expect(editorFile({}, 'proj/7', 'description')).toBe('/tmp/backlog-pane-proj_7-description.md')
+    expect(editorFile({ os: 'Windows_NT', temp: 'C:\\T' }, 'BL-7', 'plan')).toBe('C:\\T\\backlog-pane-BL-7-plan.md')
+    expect(editorFile({ os: 'Windows_NT', userProfile: 'C:\\Users\\me' }, 'BL-7', 'plan')).toBe(
+      'C:\\Users\\me\\AppData\\Local\\Temp\\backlog-pane-BL-7-plan.md',
+    )
   })
 })
