@@ -142,7 +142,7 @@ function toSummary(raw: Record<string, unknown>): TaskSummary {
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /** The tasks of a `task-list` document, or undefined for any other. */

@@ -7,7 +7,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Phase, TaskDetail, TaskSummary } from '../types'
+import type { BoardProps, Phase, TaskDetail, TaskSummary } from '../types'
 import {
   JsonDocumentReader,
   args,
@@ -17,6 +17,7 @@ import {
   errorLine,
   groupTasks,
   isHighPriority,
+  isRecord,
   neighbours,
   parseStatuses,
   readTaskList,
@@ -40,6 +41,8 @@ const detail = atom({ plugin: 'backlog-pane', key: 'detail' } as const, null as 
 const isDoneOpen = atom({ plugin: 'backlog-pane', key: 'isDoneOpen' } as const, false)
 const notice = atom({ plugin: 'backlog-pane', key: 'notice' } as const, null as string | null)
 const isCreating = atom({ plugin: 'backlog-pane', key: 'isCreating' } as const, false)
+// Set when the board's Client failed on a surface: the list stands in.
+const isBoardFailed = atom({ plugin: 'backlog-pane', key: 'isBoardFailed' } as const, false)
 
 type Run = { ok: true; stdout: string } | { ok: false; stderr: string }
 
@@ -251,6 +254,25 @@ async function create($: Engine, title: string) {
   if (run.ok) await update($, isCreating, () => false)
 }
 
+/**
+ * What the board's surface module posted: a card moved to another column,
+ * or opened. It came from code, so it is checked against the tasks shown.
+ */
+async function onBoardMessage($: Engine, data: unknown) {
+  if (!isRecord(data) || typeof data.id !== 'string') return
+  const id = data.id
+  const list = await read($, tasks)
+  const task = list.find(one => one.id === id)
+  if (!task) return
+  if (data.type === 'open') {
+    await select($, id)
+    return
+  }
+  if (data.type !== 'move' || typeof data.status !== 'string' || data.status === task.status) return
+  const shown = groupTasks(list, await read($, statuses), 0).map(group => group.status)
+  if (shown.includes(data.status)) await setStatus($, id, data.status)
+}
+
 async function work($: Engine, id: string) {
   const t = await text($)
   const draft = t.workPrompt(id)
@@ -270,6 +292,8 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    // A reload gives the board another try.
+    await update($, isBoardFailed, () => false)
     await $.command.register({
       name: COMMAND,
       description: (await text($)).commandDescription,
@@ -303,6 +327,16 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  on('ui.message', { element: 'board' }, async ($, e, next) => {
+    await onBoardMessage($, e.data)
+    return next(e)
+  })
+
+  on('ui.fault', { element: 'board' }, async ($, e, next) => {
+    await update($, isBoardFailed, () => true)
+    return next(e)
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button, Markdown } = ui
@@ -310,6 +344,9 @@ export const register: Register = (on, options) => {
     const hasForms = e.surface === 'terminal' || e.surface === 'desktop' || e.surface === 'vscode'
     const Input = hasForms && 'Input' in ui ? ui.Input : undefined
     const Select = hasForms && 'Select' in ui ? ui.Select : undefined
+    // The board where a Client draws (terminal, desktop); the list elsewhere.
+    const hasBoard = e.surface === 'terminal' || e.surface === 'desktop'
+    const Client = hasBoard && 'Client' in ui ? ui.Client : undefined
     const t = await text($)
     const now = await read($, phase)
     const message = await read($, notice)
@@ -454,7 +491,10 @@ export const register: Register = (on, options) => {
         ) : null}
         {footer}
         {list.length === 0 ? <Text dimColor>{t.noTasks}</Text> : null}
-        {groups.map(group => {
+        {list.length > 0 && Client && !(await read($, isBoardFailed)) ? (
+          <Client key="board" module="./board.tsx" width="100%" props={board(groups, e.props.bodyColumns, t)} />
+        ) : null}
+        {list.length > 0 && Client && !(await read($, isBoardFailed)) ? null : groups.map(group => {
           const rows = group.tasks.map(task => (
             <Button key={`task:${task.id}`} plain onPress={() => select($, task.id)}>
               {isHighPriority(task.priority) ? <Text color="error">! </Text> : ''}
@@ -494,6 +534,20 @@ export const register: Register = (on, options) => {
       </Box>
     )
   })
+}
+
+/** The board's props: every status shown, its colour and its cards. */
+function board(groups: ReturnType<typeof groupTasks>, width: number, t: Strings): BoardProps {
+  return {
+    columns: groups.map(group => ({
+      status: group.status,
+      color: group.color,
+      total: group.total,
+      cards: group.tasks.map(task => ({ id: task.id, title: task.title, isHigh: isHighPriority(task.priority) })),
+    })),
+    width,
+    hint: t.boardHint,
+  }
 }
 
 function safeParse(stdout: string): unknown {

@@ -1,157 +1,13 @@
-import { expect, mock, test } from 'claude-code/testing'
-import type { Engine, Mounted } from 'claude-code/testing'
-import type { On, ProcessRunResult, RenderSurface } from 'claude-code'
+import { expect, test } from 'claude-code/testing'
 
-// Nothing sits beneath the plugin under test: the hooks here stand for the
-// engine and for a fake `backlog` CLI. Task ids use a custom prefix (BL-),
-// so nothing in the mod may assume TASK-.
+import { PANE, fail, open, openTask, world } from './fixtures'
 
-const PANE = {
-  plugin: 'backlog-pane',
-  component: 'Pane',
-  requestId: 'backlog',
-  props: {
-    title: 'Backlog',
-    isFocused: false,
-    bodyColumns: 60,
-    placement: 'dock',
-    scroll: { offset: 0, bodyRows: 40 },
-    view: {},
-  },
-} as const
-
-type FakeTask = { id: string; title: string; status: string; [field: string]: unknown }
-
-const BL1: FakeTask = {
-  id: 'BL-1',
-  title: 'Write parser',
-  status: 'In Progress',
-  acceptanceCriteriaCompleted: 1,
-  acceptanceCriteriaCount: 2,
-}
-
-const TASKS: FakeTask[] = [
-  BL1,
-  { id: 'BL-2', title: 'Add login', status: 'To Do', priority: 'high' },
-  { id: 'BL-3', title: 'Old work', status: 'Done', updatedAt: '2026-01-02T00:00:00Z' },
-]
-
-const VIEW = {
-  schemaVersion: 1,
-  kind: 'task-view',
-  task: {
-    ...BL1,
-    description: 'Parse the **stream**.',
-    acceptanceCriteria: [
-      { index: 1, text: 'Handles chunks', checked: true },
-      { index: 2, text: 'Has tests', checked: false },
-    ],
-    implementationPlan: '1. Read\n2. Split',
-  },
-}
-
-const ok = (stdout: string): ProcessRunResult => ({
-  exitCode: 0,
-  stdout,
-  stderr: '',
-  isStdoutTruncated: false,
-  isStderrTruncated: false,
-})
-const fail = (stderr: string): ProcessRunResult => ({ ...ok(''), exitCode: 1, stderr })
-
-type World = {
-  surfaces?: RenderSurface[]
-  installed?: boolean
-  // What each `--watch` child does: write these stdout/stderr pieces, then
-  // exit with `code`. A child that delivered a list and exited is restarted
-  // after a backoff on the mocked clock, which the tests never reach unless
-  // they advance it, so it stands for a watch that keeps running. (A fake
-  // child left suspended mid-stream keeps the kit's acts from settling.)
-  watch?: { stdout?: string[]; stderr?: string; code?: number }
-  list?: ProcessRunResult
-  create?: ProcessRunResult
-  env?: Record<string, string>
-  // Claude Code's settings, as `$.settings.read` answers them.
-  settings?: Record<string, unknown>
-}
-
-function world(on: On, options: World = {}) {
-  const runs: string[][] = []
-  const fills: { text: string; mode?: string }[] = []
-  let spawns = 0
-  const clock = mock.clock(on)
-  mock.env(on, { OS: 'Linux', ...options.env })
-  on('settings.read', () => ({ value: options.settings ?? {} }))
-  on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('session.start', (_, e) => ({ cwd: e.cwd }))
-  on('session.surfaces', () => ({ value: options.surfaces ?? ['desktop'] }))
-  on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('ui.panes', () => ({ value: [] }))
-  on('prompt.read', () => ({ value: { text: '', cursor: 0 } }))
-  on('prompt.fill', (_, e) => {
-    fills.push({ text: e.text, mode: e.mode })
-    return { isFilled: true }
-  })
-  on('process.run', (_, e) => {
-    if (options.installed === false) throw new Error('ENOENT')
-    const argv = e.argv.slice(1)
-    runs.push(argv)
-    const command = argv.join(' ')
-    if (command === '--version') return { value: ok('1.55.3') }
-    if (command === 'config get statuses') return { value: ok('To Do, In Progress, Done\n') }
-    if (command === 'task list --json') {
-      return { value: options.list ?? ok(JSON.stringify({ kind: 'task-list', tasks: TASKS })) }
-    }
-    if (argv[0] === 'task' && argv[1] === 'view') {
-      const summary = TASKS.find(one => one.id === argv[2])
-      const view = summary?.id === VIEW.task.id ? VIEW : { ...VIEW, task: { ...VIEW.task, ...summary } }
-      return { value: ok(JSON.stringify(view, null, 2)) }
-    }
-    if (argv[0] === 'task' && argv[1] === 'create') return { value: options.create ?? ok('Created task BL-4\nFile: x.md') }
-    return { value: ok('Updated task') }
-  })
-  on('process.spawn', async function* () {
-    spawns += 1
-    const watch = options.watch ?? {
-      stdout: [JSON.stringify({ schemaVersion: 1, kind: 'task-list', tasks: TASKS }, null, 2)],
-    }
-    for (const text of watch.stdout ?? []) {
-      // Cut each document in two, as a pipe may.
-      const cut = Math.floor(text.length / 2)
-      yield { stream: 'stdout' as const, text: text.slice(0, cut) }
-      yield { stream: 'stdout' as const, text: text.slice(cut) }
-    }
-    if (watch.stderr) yield { stream: 'stderr' as const, text: watch.stderr }
-    return { value: { code: watch.code ?? 0, signal: null } }
-  })
-  return { runs, fills, clock, spawnCount: () => spawns }
-}
-
-async function open($: Engine, clock: { settle: () => Promise<void> }) {
-  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  const answer = await $.command.run({
-    command: 'backlog',
-    args: '',
-    origin: { kind: 'composer' },
-    presentation: { isFullscreen: true, columns: 160 },
-  })
-  await clock.settle()
-  return answer
-}
-
-type Drawing = Mounted<RenderSurface, 'Pane'>
-
-/** Opens a task the way the surface offers: its row in the list. */
-async function openTask(ui: Drawing, id: string) {
-  if (!(await ui.find({ key: `task:${id}` }))) await ui.press({ key: 'toggle-done' })
-  await ui.press({ key: `task:${id}` })
-}
-
-for (const surface of ['terminal', 'desktop'] as const) {
-  test(`${surface}: the board groups tasks by status and folds the final one`, async ($, on) => {
+for (const surface of ['vscode', 'mobile'] as const) {
+  test(`${surface}: the list groups tasks by status and folds the final one`, async ($, on) => {
     const { clock } = world(on)
     expect((await open($, clock)).text).toContain('opened')
     const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Client' })).toBe(undefined)
 
     expect(await ui.find({ type: 'Text', text: /^To Do/ })).toBeDefined()
     expect(await ui.find({ key: 'task:BL-1' })).toBeDefined()
@@ -163,12 +19,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ key: 'task:BL-3' })).toBeDefined()
     await ui.unmount()
   })
+}
 
+for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
   test(`${surface}: a task shows its description, criteria and plan`, async ($, on) => {
     const { clock, runs } = world(on)
     await open($, clock)
     const ui = await $.ui.mount({ ...PANE, surface })
-    await ui.press({ key: 'task:BL-1' })
+    await openTask(ui, 'BL-1')
 
     expect(runs).toContainEqual(['task', 'view', 'BL-1', '--json'])
     expect(await ui.find({ type: 'Markdown', text: 'Parse the **stream**.' })).toBeDefined()
@@ -176,10 +34,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ type: 'Text', text: '[ ] 2. Has tests' })).toBeDefined()
     expect(await ui.find({ type: 'Markdown', text: /2\. Split/ })).toBeDefined()
     await ui.press({ key: 'back' })
-    expect(await ui.find({ key: 'task:BL-2' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Parse the **stream**.' })).toBe(undefined)
     await ui.unmount()
   })
+}
 
+for (const surface of ['terminal', 'desktop'] as const) {
   test(`${surface}: status changes and new tasks go through the CLI`, async ($, on) => {
     const { clock, runs } = world(on)
     await open($, clock)
@@ -195,7 +55,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ key: 'new-task' })).toBe(undefined)
     expect((await ui.find({ key: 'new-task-open' }))?.text).toBe('+ New task')
 
-    await ui.press({ key: 'task:BL-1' })
+    await openTask(ui, 'BL-1')
     await ui.select({ key: 'status', value: 'Done' })
     expect(runs).toContainEqual(['task', 'edit', 'BL-1', '--status', 'Done'])
     expect(await ui.find({ type: 'Text', text: 'Moved BL-1 to Done.' })).toBeDefined()
@@ -211,7 +71,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     })
     await open($, clock)
     const ui = await $.ui.mount({ ...PANE, surface })
-    await ui.press({ key: 'task:BL-1' })
+    await openTask(ui, 'BL-1')
     await ui.press({ key: 'work' })
 
     expect(fills).toEqual([
