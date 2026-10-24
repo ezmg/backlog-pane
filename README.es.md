@@ -215,6 +215,37 @@ de Claude Code para el mod, como los colores, así que son solo tuyos. La clave 
 usuario: una para todos los proyectos que sincronices, enviada solo en la cabecera
 `X-Redmine-API-Key` a la URL que fija cada proyecto.
 
+### Proteger la clave de API
+
+El mod nunca le enseña la clave a Claude: no está en el prompt, en la conversación, en el
+panel (que solo dice si está configurada), en las tareas ni en el almacén del mod. Pero
+Claude Code la guarda en tu equipo, y Claude tiene herramientas que leen archivos:
+
+- **macOS** la guarda en el Llavero, que pregunta antes de que un programa la lea.
+- **Windows y Linux** la guardan en `~/.claude/.credentials.json`, un archivo de texto
+  protegido solo por los permisos de tu usuario. Claude necesitaría tu aprobación para
+  leerlo (está fuera del proyecto), salvo que un modo de permisos lo apruebe todo por ti.
+
+Para cerrar esa puerta:
+
+1. **Prohíbe leerlo**, en `~/.claude/settings.json`. Las reglas de denegación ganan a
+   cualquier modo de permisos:
+
+   ```json
+   {
+     "permissions": {
+       "deny": ["Read(~/.claude/.credentials.json)", "Bash(*credentials.json*)"]
+     }
+   }
+   ```
+
+   La regla de `Read` es la importante; la de `Bash` solo tapa los casos evidentes.
+2. **Dale a la clave solo los permisos que necesita.** Usa un usuario de Redmine cuyo rol
+   solo pueda ver peticiones si sincronizas en solo lectura; así una clave filtrada no
+   puede cambiar nada.
+3. **Regenérala** en Redmine (**Mi cuenta → Clave de acceso de la API**) si crees que se ha
+   filtrado. La antigua deja de valer al momento.
+
 ## Editar textos largos
 
 **Claude Code 2.1.301 o posterior:** **Editar**, junto a *Descripción* o *Plan de

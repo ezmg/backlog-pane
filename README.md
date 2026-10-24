@@ -200,6 +200,36 @@ Settings, links and mappings are kept **per project** in Claude Code's store for
 like the colours, so they are yours alone. The key is per user: one key for every project
 you sync, sent only in the `X-Redmine-API-Key` header to the URL each project sets.
 
+### Keeping the API key safe
+
+The mod never shows the key to Claude: it is not in the prompt, the conversation, the
+pane (which only says whether it is set), the tasks or the mod's store. But Claude Code
+keeps it on your machine, and Claude has tools that read files:
+
+- **macOS** keeps it in the Keychain, which asks before a program reads it.
+- **Windows and Linux** keep it in `~/.claude/.credentials.json`, a plain file guarded
+  only by your user's permissions. Claude would need your approval to read it (it is
+  outside the project), unless a permission mode approves everything for you.
+
+To close that door:
+
+1. **Deny reading it**, in `~/.claude/settings.json`. Deny rules win over every
+   permission mode:
+
+   ```json
+   {
+     "permissions": {
+       "deny": ["Read(~/.claude/.credentials.json)", "Bash(*credentials.json*)"]
+     }
+   }
+   ```
+
+   The `Read` rule is the one that matters; the `Bash` one only catches the plain cases.
+2. **Give the key only the rights it needs.** Use a Redmine user whose role can only view
+   issues if you sync read only, so a leaked key can change nothing.
+3. **Regenerate it** in Redmine (**My account → API access key**) if you think it leaked.
+   The old one stops working at once.
+
 ## Editing long text
 
 **Claude Code 2.1.301 and later:** **Edit** beside *Description* or *Implementation plan*
