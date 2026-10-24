@@ -6,10 +6,10 @@ import { PANE, open, world } from './fixtures'
 import type { FakeTask } from './fixtures'
 
 // The board is laid out 60 cells wide, so each of the three columns (To Do,
-// In Progress, Done) is 19 wide with a cell between them: x 0-18, 20-38,
-// 40-58. In each column, row 0 is the top border, row 1 the status chip,
-// row 2 blank; the first card is rows 3 (title) and 4 (id), the second
-// rows 6 and 7, and after the last card comes an empty slot to drop on.
+// In Progress, Done) is 18 wide with two cells between them: x 0-17, 20-37,
+// 40-57. In each column, row 0 is the status chip and row 1 blank; the
+// first card (a bordered box) is rows 2-5: border, title, id, border; the
+// second rows 6-9; under the last card is room for the drop slot.
 const SIZE = { columns: 60, rows: 12, in: 'board' } as const
 const TODO = 5
 const DOING = 25
@@ -23,7 +23,7 @@ const SLOT = 6
 const title = (text: RegExp) => ({ type: 'Text', text, in: 'board' })
 
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`${surface}: the board draws one bordered column per status, in theme colours`, async ($, on) => {
+  test(`${surface}: each card is a box bordered in its status's colour, under the status chip`, async ($, on) => {
     const { clock } = world(on)
     await open($, clock)
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -34,15 +34,17 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ key: 'task:BL-1' })).toBe(undefined)
 
     await ui.resize(SIZE)
-    for (const [status, color] of [
-      ['To Do', 'suggestion'],
-      ['In Progress', 'warning'],
-      ['Done', 'success'],
+    for (const [status, color, id] of [
+      ['To Do', 'suggestion', 'BL-2'],
+      ['In Progress', 'warning', 'BL-1'],
+      ['Done', 'success', 'BL-3'],
     ] as const) {
       const column = await ui.find({ key: `column:${status}`, in: 'board' })
-      expect(column?.props.borderStyle).toBe('round')
-      expect(column?.props.borderColor).toBe(color)
-      expect(column?.props.width).toBe(19)
+      expect(column?.props.borderStyle).toBe(undefined)
+      expect(column?.props.width).toBe(18)
+      const card = await ui.find({ key: `card:${id}`, in: 'board' })
+      expect(card?.props.borderStyle).toBe('round')
+      expect(card?.props.borderColor).toBe(color)
       // The status is a chip: the status's colour behind it.
       const chip = await ui.find({ type: 'Text', text: new RegExp(`^ ${status} $`), in: 'board' })
       expect(chip?.props.backgroundColor).toBe(color)
@@ -66,16 +68,17 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.resize(SIZE)
     await ui.pointer({ type: 'down', x: TODO, y: FIRST_CARD, button: 'left', in: 'board' })
     await ui.pointer({ type: 'move', x: DOING, y: FIRST_CARD, button: 'left', in: 'board' })
-    // The column under the card is marked while it is dragged.
-    const target = await ui.find({ key: 'column:In Progress', in: 'board' })
-    expect(target?.props.borderStyle).toBe('double')
-    expect(await ui.find({ type: 'Text', text: /^┄+$/, in: 'board' })).toBeDefined()
+    // A dashed slot in the colour of the column under the card shows where it lands.
+    const slot = await ui.find({ key: 'slot', in: 'board' })
+    expect(slot?.props.borderStyle).toBe('dashed')
+    expect(slot?.props.borderColor).toBe('warning')
     await ui.pointer({ type: 'up', x: DOING, y: FIRST_CARD, button: 'left', in: 'board' })
     expect(edits()).toEqual([['task', 'edit', 'BL-2', '--status', 'In Progress']])
     expect(await ui.find({ type: 'Text', text: 'Moved BL-2 to In Progress.' })).toBeDefined()
-    // Shown in its new column at once.
+    // Shown in its new column at once, in that column's colour.
     expect(await ui.find({ type: 'Text', text: ' 2', in: 'board' })).toBeDefined()
-    expect((await ui.find({ key: 'column:In Progress', in: 'board' }))?.props.borderStyle).toBe('round')
+    expect((await ui.find({ key: 'card:BL-2', in: 'board' }))?.props.borderColor).toBe('warning')
+    expect(await ui.find({ key: 'slot', in: 'board' })).toBe(undefined)
     await ui.unmount()
   })
 
@@ -209,14 +212,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
     })
     await open($, clock)
     const ui = await $.ui.mount({ ...PANE, surface })
-    // Four columns in 60 cells: 14 each.
+    // Four columns in 60 cells, two apart: 13 each.
     await ui.resize(SIZE)
-    const column = await ui.find({ key: 'column:Cancelled', in: 'board' })
-    expect(column?.props.borderColor).toBe('inactive')
-    expect(column?.props.borderDimColor).toBe(true)
+    const card = await ui.find({ key: 'card:BL-5', in: 'board' })
+    expect(card?.props.borderColor).toBe('inactive')
+    expect(card?.props.borderDimColor).toBe(true)
     expect((await ui.find(title(/^Old idea$/)))?.props.dimColor).toBe(true)
     // The first open status takes the first colour.
-    expect((await ui.find({ key: 'column:To Do', in: 'board' }))?.props.borderColor).toBe('suggestion')
+    expect((await ui.find({ key: 'card:BL-2', in: 'board' }))?.props.borderColor).toBe('suggestion')
 
     // The first key selects the first open card, not the closed one.
     await ui.key({ key: 'down', in: 'board' })
@@ -241,7 +244,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await open($, clock)
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.resize(SIZE)
-    // Columns of 14, a cell apart: Cancelled 0-13, To Do 15-28.
+    // Columns of 13, two cells apart: Cancelled 0-12, To Do 15-27.
     await ui.pointer({ type: 'down', x: 17, y: FIRST_CARD, button: 'left', in: 'board' })
     await ui.pointer({ type: 'move', x: 3, y: FIRST_CARD, button: 'left', in: 'board' })
     await ui.pointer({ type: 'up', x: 3, y: FIRST_CARD, button: 'left', in: 'board' })
@@ -271,34 +274,33 @@ describe('board layout', () => {
     hint: '',
   }
 
-  test('columns share the width a cell apart, never under 12 cells', async () => {
-    expect(columnWidth(props, 0)).toBe(20)
-    expect(columnWidth(props, 50)).toBe(16)
+  test('columns share the width two cells apart, never under 12 cells', async () => {
+    expect(columnWidth(props, 0)).toBe(19)
+    expect(columnWidth(props, 50)).toBe(15)
     expect(columnWidth(props, 20)).toBe(12)
   })
 
-  test('columns are as tall as the tallest, plus a slot to drop on', async () => {
-    // Border, chip, blank, two cards of three rows, a slot of two, border.
-    expect(columnHeight(props)).toBe(12)
-    expect(columnHeight({ ...props, columns: [] })).toBe(6)
+  test('columns are as tall as the tallest, plus room for the drop slot', async () => {
+    // Chip, blank, two cards of four rows (border, title, id, border), a slot of three.
+    expect(columnHeight(props)).toBe(13)
+    expect(columnHeight({ ...props, columns: [] })).toBe(5)
   })
 
   test('a cell maps to a column and a card', async () => {
     const [first, second] = props.columns[0]?.cards ?? []
+    // The chip and the blank under it: the column alone.
     expect(hit(props, 20, 3, 0)).toEqual({ column: 0, card: undefined })
     expect(hit(props, 20, 3, 1)).toEqual({ column: 0, card: undefined })
-    expect(hit(props, 20, 3, 3)).toEqual({ column: 0, card: first })
-    expect(hit(props, 20, 3, 4)).toEqual({ column: 0, card: first })
-    expect(hit(props, 20, 3, 5)).toEqual({ column: 0, card: first })
-    expect(hit(props, 20, 3, 6)).toEqual({ column: 0, card: second })
-    expect(hit(props, 20, 3, 9)).toEqual({ column: 0, card: undefined })
-    // The gap after a column belongs to it; the second column starts at 21.
-    expect(hit(props, 20, 20, 1)).toEqual({ column: 0, card: undefined })
-    expect(hit(props, 20, 21, 3)).toEqual({ column: 1, card: undefined })
-    expect(hit(props, 20, 20, 3)).toEqual({ column: 0, card: first })
+    // Every row of a card, its borders included.
+    for (const y of [2, 3, 4, 5]) expect(hit(props, 20, 3, y)).toEqual({ column: 0, card: first })
+    for (const y of [6, 7, 8, 9]) expect(hit(props, 20, 3, y)).toEqual({ column: 0, card: second })
+    expect(hit(props, 20, 3, 10)).toEqual({ column: 0, card: undefined })
+    // The gap after a column belongs to it; the second column starts at 22.
+    expect(hit(props, 20, 21, 3)).toEqual({ column: 0, card: first })
+    expect(hit(props, 20, 22, 3)).toEqual({ column: 1, card: undefined })
     // Past the last column, and under the columns (the hint), nothing.
-    expect(hit(props, 20, 63, 3)).toBe(undefined)
-    expect(hit(props, 20, 3, 12)).toBe(undefined)
+    expect(hit(props, 20, 66, 3)).toBe(undefined)
+    expect(hit(props, 20, 3, 13)).toBe(undefined)
     expect(hit(props, 20, -1, 3)).toBe(undefined)
     expect(locate(props, 'A-2')).toEqual({ column: 0, row: 1 })
     expect(locate(props, 'A-9')).toBe(undefined)

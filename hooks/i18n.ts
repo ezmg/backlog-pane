@@ -114,7 +114,22 @@ const en = {
   configMismatch: 'Backlog.md did not read the new statuses, so the config was put back as it was.',
   statusesNote:
     'Backlog.md has no command to change statuses, so the pane rewrites only the statuses line of its config and then checks that Backlog.md reads it. Task counts leave out drafts and archived tasks.',
-  closedHint: 'To fold a status and leave it out of ◀/▶, add it to the plugin option closedStatuses.',
+  closedHint: 'A closed status is folded and dim, and ◀/▶ and the board’s arrow keys skip it. Colours and closed statuses are kept for this project only.',
+  colour: 'Colour',
+  closedCheck: 'Closed',
+  autoColour: 'Automatic',
+  colourNames: {
+    suggestion: 'Blue',
+    ide: 'Steel blue',
+    planMode: 'Teal',
+    success: 'Green',
+    warning: 'Amber',
+    claude: 'Orange',
+    error: 'Red',
+    merged: 'Purple',
+    permission: 'Lavender',
+    inactive: 'Grey',
+  } as Record<string, string>,
 }
 
 export type Strings = typeof en
@@ -225,7 +240,22 @@ const es: Strings = {
   configMismatch: 'Backlog.md no leyó los estados nuevos, así que la configuración se dejó como estaba.',
   statusesNote:
     'Backlog.md no tiene un comando para cambiar los estados, así que el panel reescribe solo la línea de estados de su configuración y después comprueba que Backlog.md la lee. Los recuentos no incluyen borradores ni tareas archivadas.',
-  closedHint: 'Para plegar un estado y que ◀/▶ se lo salte, añádelo a la opción closedStatuses del plugin.',
+  closedHint: 'Un estado cerrado sale plegado y atenuado, y ◀/▶ y las flechas del tablero se lo saltan. Los colores y los estados cerrados se guardan solo para este proyecto.',
+  colour: 'Color',
+  closedCheck: 'Cerrado',
+  autoColour: 'Automático',
+  colourNames: {
+    suggestion: 'Azul',
+    ide: 'Azul acero',
+    planMode: 'Verde azulado',
+    success: 'Verde',
+    warning: 'Ámbar',
+    claude: 'Naranja',
+    error: 'Rojo',
+    merged: 'Morado',
+    permission: 'Lavanda',
+    inactive: 'Gris',
+  },
 }
 
 const tables: Record<Language, Strings> = { en, es }

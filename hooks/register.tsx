@@ -7,7 +7,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BoardProps, Phase, TaskDetail, TaskSummary } from '../types'
+import type { BoardProps, Phase, Prefs, TaskDetail, TaskSummary } from '../types'
 import {
   JsonDocumentReader,
   args,
@@ -20,12 +20,15 @@ import {
   groupTasks,
   isAtLeast,
   isHighPriority,
+  isPaletteColor,
   isRecord,
   neighbours,
+  PALETTE,
   parseClosed,
   parsePriorities,
   parseStatuses,
   pickEditor,
+  readPrefs,
   readTaskList,
   readTaskView,
   rewriteCriteria,
@@ -68,13 +71,17 @@ const isBoardFailed = atom({ plugin: 'backlog-pane', key: 'isBoardFailed' } as c
 // The statuses view, and where a new status goes in it (null: before the final one).
 const isManagingStatuses = atom({ plugin: 'backlog-pane', key: 'isManagingStatuses' } as const, false)
 const newStatusAt = atom({ plugin: 'backlog-pane', key: 'newStatusAt' } as const, null as number | null)
+// This project's colours and closed statuses, and the $.store key they are kept under.
+const prefs = atom({ plugin: 'backlog-pane', key: 'prefs' } as const, { colors: {} } as Prefs)
+const prefsKey = atom({ plugin: 'backlog-pane', key: 'prefsKey' } as const, null as string | null)
 
 type Run = { ok: true; stdout: string } | { ok: false; stderr: string }
 
 // Read from the plugin's options each time the module loads.
 let configured = ''
 let doneLimit = 5
-let closed: string[] = []
+// The closedStatuses option: the closed statuses of a project whose own are not set yet.
+let closedOption: string[] = []
 // The session's working folder, from session.start: where the config is looked for from.
 let cwd = ''
 let languageOption: unknown = 'auto'
@@ -170,6 +177,53 @@ async function loadStatuses($: Engine) {
   if (run.ok) await update($, statuses, () => parseStatuses(run.stdout))
   const listed = await backlog($, args.priorities())
   await update($, priorities, () => parsePriorities(listed.ok ? listed.stdout : ''))
+  await loadPrefs($)
+}
+
+/** This project's prefs, kept in $.store under its config's path (else its folder). */
+async function loadPrefs($: Engine) {
+  const key = `project:${(await findConfig($)) ?? cwd}`
+  let stored: unknown
+  try {
+    stored = await $.store.get(key)
+  } catch {
+    // Nothing kept yet.
+  }
+  await update($, prefsKey, () => key)
+  await update($, prefs, () => readPrefs(stored))
+}
+
+/** The project's closed statuses: its own, else the closedStatuses option's. */
+const closedOf = (kept: Prefs) => kept.closed ?? closedOption
+
+async function savePrefs($: Engine, change: (kept: Prefs) => Prefs) {
+  const next = await update($, prefs, change)
+  const key = await read($, prefsKey)
+  if (!key) return
+  try {
+    await $.store.set(key, next)
+  } catch (error) {
+    await update($, notice, () => String(error))
+  }
+}
+
+/** Gives a status a colour of the palette, or `auto` for the one it would have. */
+async function setStatusColor($: Engine, status: string, color: string) {
+  await savePrefs($, kept => {
+    const colors = { ...kept.colors }
+    if (isPaletteColor(color)) colors[status] = color
+    else delete colors[status]
+    return { ...kept, colors }
+  })
+}
+
+async function toggleClosed($: Engine, status: string) {
+  await savePrefs($, kept => {
+    const now = closedOf(kept)
+    const isClosed = now.some(one => one.toLowerCase() === status.toLowerCase())
+    const next = isClosed ? now.filter(one => one.toLowerCase() !== status.toLowerCase()) : [...now, status]
+    return { ...kept, closed: next }
+  })
 }
 
 async function loadDetail($: Engine, id: string) {
@@ -552,6 +606,15 @@ async function removeStatus($: Engine, status: string) {
   if (await writeStatuses($, order.filter(one => one !== status))) {
     await update($, notice, () => t.statusRemoved(status))
     await update($, editing, () => null)
+    // A status of the same name added later starts afresh.
+    const kept = await read($, prefs)
+    if (status in kept.colors || kept.closed?.includes(status)) {
+      await savePrefs($, now => {
+        const colors = { ...now.colors }
+        delete colors[status]
+        return now.closed ? { colors, closed: now.closed.filter(one => one !== status) } : { colors }
+      })
+    }
   }
 }
 
@@ -570,7 +633,7 @@ async function onBoardMessage($: Engine, data: unknown) {
     return
   }
   if (data.type !== 'move' || typeof data.status !== 'string' || data.status === task.status) return
-  const shown = groupTasks(list, await read($, statuses), 0, closed).map(group => group.status)
+  const shown = groupTasks(list, await read($, statuses), 0).map(group => group.status)
   if (shown.includes(data.status)) await setStatus($, id, data.status)
 }
 
@@ -604,7 +667,7 @@ async function editWithClaude($: Engine, id: string) {
 export const register: Register = (on, options) => {
   configured = typeof options.backlogPath === 'string' ? options.backlogPath : ''
   doneLimit = typeof options.doneLimit === 'number' ? options.doneLimit : 5
-  closed = parseClosed(options.closedStatuses)
+  closedOption = parseClosed(options.closedStatuses)
   languageOption = options.language
   language = null
 
@@ -760,11 +823,13 @@ export const register: Register = (on, options) => {
 
     const id = await read($, selectedId)
     const order = await read($, statuses)
+    const kept = await read($, prefs)
+    const closed = closedOf(kept)
 
     if (await read($, isManagingStatuses)) {
       const all = await read($, tasks)
       const now = await read($, editing)
-      const shown = groupTasks(all, order, 0, closed)
+      const shown = groupTasks(all, order, 0, closed, kept.colors)
       const final = order[order.length - 1]
       const at = (await read($, newStatusAt)) ?? Math.max(0, order.length - 1)
       return (
@@ -778,10 +843,8 @@ export const register: Register = (on, options) => {
             {order.map((status, i) => {
               const count = all.filter(task => task.status === status).length
               const group = shown.find(one => one.status === status)
-              const tags = [
-                status === final ? t.finalTag : null,
-                group?.isClosed ? t.closedTag : null,
-              ].filter(tag => tag !== null)
+              // Closed shows on its checkbox.
+              const tags = status === final ? [t.finalTag] : []
               if (now === `remove-status:${status}`) {
                 return (
                   <Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -796,6 +859,16 @@ export const register: Register = (on, options) => {
                   </Box>
                 )
               }
+              const picked = kept.colors[status]
+              const colourOptions = [
+                { value: 'auto', label: t.autoColour },
+                ...PALETTE.map(key => ({ value: key, label: t.colourNames[key] ?? key })),
+              ]
+              const shownColour = isPaletteColor(picked) ? picked : 'auto'
+              const nextColour = () => {
+                const at = colourOptions.findIndex(option => option.value === shownColour)
+                return colourOptions[(at + 1) % colourOptions.length]?.value ?? 'auto'
+              }
               return (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
                   <Text color={group?.color}>■</Text>
@@ -806,6 +879,30 @@ export const register: Register = (on, options) => {
                     {t.taskCount(count)}
                     {tags.length > 0 ? ` · ${tags.join(' · ')}` : ''}
                   </Text>
+                  {Select ? (
+                    <Select
+                      key={`status-colour-${i}`}
+                      label={t.colour}
+                      value={shownColour}
+                      options={colourOptions}
+                      onSelect={value => setStatusColor($, status, value)}
+                    />
+                  ) : (
+                    <Button
+                      key={`status-colour-${i}`}
+                      plain
+                      label={`${t.colour}: ${colourOptions.find(option => option.value === shownColour)?.label ?? ''}`}
+                      onPress={() => setStatusColor($, status, nextColour())}
+                    />
+                  )}
+                  {status !== final ? (
+                    <Button
+                      key={`status-closed-${i}`}
+                      plain
+                      label={`${group?.isClosed ? '[x]' : '[ ]'} ${t.closedCheck}`}
+                      onPress={() => toggleClosed($, status)}
+                    />
+                  ) : null}
                   {count === 0 ? (
                     <Button
                       key={`status-remove-${i}`}
@@ -851,7 +948,7 @@ export const register: Register = (on, options) => {
       const summary = (await read($, tasks)).find(one => one.id === id)
       const status = task?.status ?? summary?.status ?? ''
       const choices = order.includes(status) || !status ? order : [...order, status]
-      const color = groupTasks([], choices, 0, closed).find(group => group.status === status)?.color
+      const color = groupTasks([], choices, 0, closed, kept.colors).find(group => group.status === status)?.color
       const title = task?.title ?? summary?.title ?? id
       const priority = task?.priority ?? summary?.priority ?? null
       const isHigh = isHighPriority(priority)
@@ -1038,7 +1135,7 @@ export const register: Register = (on, options) => {
 
     const list = await read($, tasks)
     const unfolded = await read($, openGroups)
-    const groups = groupTasks(list, order, doneLimit, closed)
+    const groups = groupTasks(list, order, doneLimit, closed, kept.colors)
     const creating = await read($, isCreating)
     const hasBoard = list.length > 0 && Client !== undefined && !(await read($, isBoardFailed))
     return (

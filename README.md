@@ -19,21 +19,21 @@ for you**.
 
 ## Features
 
-- **Live board.** On the terminal and the desktop app, one bordered column per status in
-  your configured order, headed by the status as a chip in its colour. Each card shows its
-  title (on two lines if it needs them), its ID and its criteria done. Drag a card to
-  another column to move it, or use the keyboard (see [Shortcuts](#shortcuts)). The final
+- **Live board.** On the terminal and the desktop app, one column per status in your
+  configured order, headed by the status as a chip in its colour. Each card is a box
+  bordered in its status's colour, with its title (on two lines if it needs them), its ID
+  and its criteria done; a card moved to another column takes that column's colour. Drag
+  a card to another column to move it, or use the keyboard (see [Shortcuts](#shortcuts)). The final
   status (usually *Done*) shows only its most recent tasks. VS Code and mobile show the
   same tasks as a list grouped by status, with the final status folded.
-- **Closed statuses.** List statuses such as *Cancelled* in the `closedStatuses` option.
-  They are drawn dim and folded like the final status, and ◀/▶ and the board's arrow keys
-  skip them. You can still move a task there with the status picker or by dragging.
-- **Create and delete statuses.** **Statuses…** lists every status with its task count.
-  Add one and pick where it goes (at the start, or after any status), or delete one that no
-  task is in.
+- **Statuses, from the pane.** **Statuses…** lists every status with its task count. There
+  you add one and pick where it goes, delete one that no task is in, pick each status's
+  colour, and tick **Closed** for statuses such as *Cancelled*. Closed ones are drawn dim
+  and folded like the final status, and ◀/▶ and the board's arrow keys skip them; you can
+  still move a task there with the status picker or by dragging.
 - **Colours that follow your theme.** Statuses use theme colours, so they suit light and
-  dark themes: the first status, an *In Progress* one, and the final one each have their
-  own, and the others take turns. High-priority tasks get a **`!`** in the error colour,
+  dark themes. Unless you pick one, the first status, an *In Progress* one, and the final
+  one each have their own, and the others take turns. High-priority tasks get a **`!`** in the error colour,
   so the meaning does not depend on colour alone.
 - **New task.** **+ New task** opens a title field. **Cancel** closes it, and it closes by
   itself once the task is created.
@@ -110,9 +110,20 @@ Backlog.md has no command for this, so the pane:
 3. runs `backlog config get statuses`, and if Backlog.md does not read exactly the new list,
    puts the file back as it was and says so.
 
-**Closed statuses** are set in the plugin option `closedStatuses`, for example `Cancelled`
-(several separated by commas; case does not matter). The final status is always final,
-listed or not.
+Each row also has:
+
+- **Colour:** one of the theme's colours (Blue, Steel blue, Teal, Green, Amber, Orange,
+  Red, Purple, Lavender, Grey), or **Automatic** for the one the pane would give it. The
+  status's chip, its cards' borders and its swatch take it at once. Mobile cycles through
+  them with a button.
+- **Closed:** a closed status is folded and dim, and ◀/▶ and the board's arrow keys skip
+  it. The final status is always final, so it has no box.
+
+Colours and closed statuses are kept **per project**, in Claude Code's own store for the
+mod (keyed by the project's config file), because Backlog.md's config has no place for
+them. They are yours alone: they are not in the repository, so teammates don't share
+them, and a project moved to another folder starts afresh. The `closedStatuses` option
+(below) is only the starting value for a project where no **Closed** box was ever ticked.
 
 ## Editing long text
 
@@ -150,24 +161,26 @@ _Screenshots are coming. Until then, this is a text preview of the terminal pane
 ```text
 [ + New task ] [ Statuses… ]
 
-╭─────────────╮ ╭─────────────╮ ╭─────────────╮ ╭─────────────╮
-│  Cancell… 1 │ │  To Do  1   │ │  In Prog… 1 │ │  Done  2    │
-│             │ │             │ │             │ │             │
-│ Old export  │ │ ! Rate      │ │ ! Write the │ │ Add login   │
-│ idea        │ │   limiting… │ │   JSON str… │ │ page        │
-│ TASK-5      │ │ TASK-3      │ │ TASK-1 · 1… │ │ TASK-2      │
-│             │ │             │ │             │ │             │
-│             │ │             │ │             │ │ Dark mode   │
-│             │ │             │ │             │ │ TASK-4      │
-│             │ │             │ │             │ │             │
-╰─────────────╯ ╰─────────────╯ ╰─────────────╯ ╰─────────────╯
+ Cancelled  1     To Do  1         In Progress  1   Done  2
+
+╭─────────────╮  ╭─────────────╮  ╭─────────────╮  ╭─────────────╮
+│ Old export  │  │ ! Rate      │  │ ! Write the │  │ Add login   │
+│ idea        │  │   limiting… │  │   JSON str… │  │ page        │
+│ TASK-5      │  │ TASK-3      │  │ TASK-1 · 1… │  │ TASK-2      │
+╰─────────────╯  ╰─────────────╯  ╰─────────────╯  ╰─────────────╯
+                                                   ╭─────────────╮
+                                                   │ Dark mode   │
+                                                   │ TASK-4      │
+                                                   ╰─────────────╯
+
 Drag a card to another column, or click it and press ←/→ to move
 it, ↑/↓ to pick another, Enter to open it.
 ```
 
-_That is the pane docked in a 150-column terminal (Claude Code 2.1.310), with Cancelled
-as a closed status. On screen, each status is a chip in its colour, its column's border
-takes that colour, and Cancelled is dimmed._
+_That is the pane docked in a 150-column terminal (Claude Code 2.1.310). On screen each
+status is a chip in its colour and each card's border takes its status's colour; the
+selected card has a thick border, and the column a card is dragged over shows a dashed
+slot where it will land._
 
 ## Requirements
 
@@ -226,7 +239,7 @@ To close the pane, click its close mark or press `ctrl+x` then `x`. Closing it s
 | --- | --- | --- |
 | `backlogPath` | *(empty)* | Full path to the `backlog` executable. When empty, the mod tries `backlog` on PATH. On Windows it then tries the native binaries npm and bun install globally. |
 | `doneLimit` | `5` | How many of the most recent tasks in the final status (and in each closed status) the board shows, and the list shows when that group is unfolded. |
-| `closedStatuses` | *(empty)* | Statuses that count as closed besides the final one, separated by commas (for example `Cancelled`). They are drawn dim and folded, and ◀/▶ and the board's arrow keys skip them. |
+| `closedStatuses` | *(empty)* | Optional. Statuses that start as closed in a project where you have never ticked a **Closed** box in **Statuses…**, separated by commas (for example `Cancelled`). Once you tick or untick one, the project keeps its own list. |
 | `language` | `auto` | `en` (English), `es` (Spanish), or `auto`. With `auto` the mod uses the first of these that is set: Claude Code's `language` setting (free text such as `Español`, `Spanish` or `English`), then `LC_ALL`, `LC_MESSAGES`, `LANG`, then the system locale. If none is set, it uses English. Any language other than Spanish shows English. |
 
 Change them under the plugin's settings in `/plugin`. In a session that loads the mod from
@@ -399,6 +412,7 @@ cover:
 - language detection and both languages;
 - the board's layout, pointer and keys, and the list fallback;
 - closed statuses, and creating and deleting statuses (with the config rewrite and its check);
+- each status's colour and its **Closed** box, kept per project, and cards taking their status's colour;
 - every editing control, the inline field and the external editor;
 - both drafts;
 - the missing-CLI, uninitialized, failing-watch and headless states.

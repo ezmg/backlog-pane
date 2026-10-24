@@ -85,7 +85,11 @@ for (const surface of ['terminal', 'desktop', 'vscode'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     await ui.press({ key: 'statuses-open' })
     expect(await ui.find({ type: 'Text', text: 'Statuses' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '1 task · closed' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^1 task$/ })).toBeDefined()
+    expect((await ui.find({ key: 'status-closed-0' }))?.text).toBe('[x] Closed')
+    expect((await ui.find({ key: 'status-closed-1' }))?.text).toBe('[ ] Closed')
+    // The final status is always final: no checkbox.
+    expect(await ui.find({ key: 'status-closed-4' })).toBe(undefined)
     expect(await ui.find({ type: 'Text', text: '1 task · final' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'no tasks' })).toBeDefined()
     // Only a status no task is in can be deleted: Review, the fourth.
@@ -254,7 +258,8 @@ test('Spanish: the statuses view', { options: { language: 'es', closedStatuses: 
   expect((await ui.find({ key: 'statuses-open' }))?.text).toBe('Estados…')
   await ui.press({ key: 'statuses-open' })
   expect(await ui.find({ type: 'Text', text: 'Estados' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '1 tarea · cerrado' })).toBeDefined()
+  expect((await ui.find({ key: 'status-closed-0' }))?.text).toBe('[x] Cerrado')
+  expect((await ui.find({ key: 'status-colour-0' }))?.props.label).toBe('Color')
   const picker = await ui.find({ key: 'status-position' })
   expect(picker?.props.label).toBe('Posición')
   expect((picker?.props.options as { label: string }[])[0]?.label).toBe('Al principio')

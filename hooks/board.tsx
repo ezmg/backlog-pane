@@ -3,12 +3,13 @@
 // posted to the hooks module (`ui.message`), which runs the backlog command.
 //
 // The layout is computed, not measured, so a pointer's cell maps straight
-// to a card (`layout`, which the drawing and `hit` share). Each column is a
-// rounded box `width` cells wide, one cell apart. Inside its border, row 0
-// is the status (a chip in its colour) and row 1 is blank; then each card
-// takes its title (one line, or two when it does not fit), its id and
-// criteria, and a blank; one more empty slot, the drop target, closes
-// every column. Clicking a card selects it; dragging it to another column,
+// to a card (`layout`, which the drawing and `hit` share). Each column is
+// `width` cells wide, two cells apart. Row 0 is its status (a chip in the
+// status's colour) and row 1 is blank; then each card is a rounded box in
+// that colour, so a card moved to another column takes that column's
+// colour: its border, its title (one line, or two when it does not fit),
+// its id and criteria, its border. A dashed slot under the cards of the
+// column a card is dragged over marks where it will land. Clicking a card selects it; dragging it to another column,
 // or clicking another column while it is selected, moves it; clicking it
 // again opens it. With the focus here, ←/→ move the selected card to the
 // nearest open column (closed ones are skipped), ↑/↓ pick another, Enter
@@ -22,12 +23,12 @@ type Drag = { id: string; from: number; over: number; wasSelected: boolean }
 type State = { selected?: string; drag?: Drag }
 
 const MIN_WIDTH = 12
-const GAP = 1
-/** Rows inside a column's border above its first card: the chip and a blank. */
+const GAP = 2
+/** Rows above a column's first card: the chip and a blank. */
 const HEAD = 2
-/** Rows the drop slot takes. */
-const SLOT = 2
-/** Cells inside a column: its width less the border and a cell of padding each side. */
+/** Rows the drop slot takes: a dashed box of one line. */
+const SLOT = 3
+/** Cells inside a card: the column's width less the card's border and a cell of padding each side. */
 const innerOf = (width: number) => Math.max(1, width - 4)
 
 /** The width of one column, from the region's width or the pane's. */
@@ -48,10 +49,10 @@ export function wrapTitle(text: string, width: number): string[] {
   return [text.slice(0, cut).trimEnd(), fit(text.slice(cut).trimStart(), width)]
 }
 
-/** Each card's title lines and first row, from the top of the column's inside. */
+/** Each card's title lines, its first row and its rows, from the top of its column. */
 export type Layout = {
   cards: { lines: string[]; top: number; rows: number }[][]
-  /** Rows of every column, its border included: all are as tall as the tallest. */
+  /** Rows of every column, the drop slot included: all are as tall as the tallest. */
   height: number
 }
 
@@ -62,8 +63,8 @@ export function layout(props: BoardProps, width: number): Layout {
     let top = HEAD
     const placed = column.cards.map(card => {
       const lines = wrapTitle(card.title, inner - (card.isHigh ? 2 : 0))
-      // The title, the id line and a blank.
-      const rows = lines.length + 2
+      // The border, the title, the id line, the border.
+      const rows = lines.length + 3
       const one = { lines, top, rows }
       top += rows
       return one
@@ -71,10 +72,10 @@ export function layout(props: BoardProps, width: number): Layout {
     tallest = Math.max(tallest, top)
     return placed
   })
-  return { cards, height: 2 + tallest + SLOT }
+  return { cards, height: tallest + SLOT }
 }
 
-/** Rows a column takes, its border included. */
+/** Rows a column takes, the drop slot included. */
 export const columnHeight = (props: BoardProps, width = 40) => layout(props, width).height
 
 /** Where a card is: its column and its place (0 for the first card). */
@@ -97,9 +98,7 @@ export function hit(
   const column = Math.floor(x / (width + GAP))
   const placed = layout(props, width)
   if (x < 0 || column >= props.columns.length || y < 0 || y >= placed.height) return undefined
-  // From the top of the column's inside, under its border.
-  const row = y - 1
-  const at = placed.cards[column]?.findIndex(one => row >= one.top && row < one.top + one.rows) ?? -1
+  const at = placed.cards[column]?.findIndex(one => y >= one.top && y < one.top + one.rows) ?? -1
   return { column, card: at === -1 ? undefined : props.columns[column]?.cards[at] }
 }
 
@@ -192,18 +191,9 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
       <Box flexDirection="row" columnGap={GAP}>
         {props.columns.map((column, i) => {
           const isTarget = drag !== undefined && drag.over === i && drag.over !== drag.from
-          const label = fit(` ${column.status} `, Math.max(1, inner - String(column.total).length - 1))
+          const label = fit(` ${column.status} `, Math.max(1, width - String(column.total).length - 1))
           return (
-            <Box
-              key={`column:${column.status}`}
-              flexDirection="column"
-              width={width}
-              height={height}
-              paddingX={1}
-              borderStyle={isTarget ? 'double' : 'round'}
-              borderColor={isTarget ? 'suggestion' : column.color}
-              borderDimColor={column.isClosed && !isTarget}
-            >
+            <Box key={`column:${column.status}`} flexDirection="column" width={width} height={height}>
               <Text>
                 <Text backgroundColor={column.color} color="inverseText" bold>
                   {label}
@@ -216,7 +206,15 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
                 const isFaded = column.isClosed || drag?.id === card.id
                 const lines = placed.cards[i]?.[k]?.lines ?? [card.title]
                 return (
-                  <Box key={`card:${card.id}`} flexDirection="column">
+                  <Box
+                    key={`card:${card.id}`}
+                    flexDirection="column"
+                    width={width}
+                    paddingX={1}
+                    borderStyle={isSelected ? 'bold' : 'round'}
+                    borderColor={column.color}
+                    borderDimColor={isFaded}
+                  >
                     {lines.map((line, n) => (
                       <Text inverse={isSelected} dimColor={isFaded} bold={!column.isClosed}>
                         {n === 0 && card.isHigh ? <Text color="error">! </Text> : n > 0 && card.isHigh ? '  ' : ''}
@@ -226,11 +224,12 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
                     <Text inverse={isSelected} dimColor>
                       {fit(card.meta, inner)}
                     </Text>
-                    <Text> </Text>
                   </Box>
                 )
               })}
-              <Text dimColor>{isTarget ? fit('┄'.repeat(inner), inner) : ' '}</Text>
+              {isTarget ? (
+                <Box key="slot" width={width} height={SLOT} borderStyle="dashed" borderColor={column.color} />
+              ) : null}
             </Box>
           )
         })}
