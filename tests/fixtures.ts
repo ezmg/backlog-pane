@@ -81,8 +81,9 @@ export type World = {
   settings?: Record<string, unknown>
   // The engine's version, as `$.session.version()` answers it.
   version?: string
-  // What the prompt box holds.
+  // What the prompt box holds, and whether it takes a fill.
   prompt?: string
+  isFillRefused?: boolean
   // What the external editor does with the file it is handed: the text it
   // leaves there, or how it fails.
   editor?: { writes?: string; result?: ProcessRunResult; throws?: string }
@@ -109,7 +110,7 @@ export function world(on: On, options: World = {}) {
   on('prompt.read', () => ({ value: { text: options.prompt ?? '', cursor: 0 } }))
   on('prompt.fill', (_, e) => {
     fills.push({ text: e.text, mode: e.mode })
-    return { isFilled: true }
+    return { isFilled: options.isFillRefused !== true }
   })
   on('fs.write', (_, e) => {
     files.set(e.path, e.text)

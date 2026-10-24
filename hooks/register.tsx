@@ -458,6 +458,22 @@ async function work($: Engine, id: string) {
   await update($, notice, () => (filled.isFilled ? t.draftReady(id) : t.draftRejected(draft)))
 }
 
+/**
+ * Starts a request to Claude about the task: `Update <ID>: ` in the prompt
+ * box, the caret after it, never sent. An empty box is replaced; text
+ * already there is kept and the request starts on a new line below it.
+ */
+async function editWithClaude($: Engine, id: string) {
+  const t = await text($)
+  const draft = t.editPrompt(id)
+  const box = await $.prompt.read()
+  const filled =
+    box.text.trim() === ''
+      ? await $.prompt.fill({ text: draft, mode: 'replace' })
+      : await $.prompt.fill({ text: `\n${draft}`, mode: 'append' })
+  await update($, notice, () => (filled.isFilled ? t.editReady(id) : t.draftRejected(draft)))
+}
+
 export const register: Register = (on, options) => {
   configured = typeof options.backlogPath === 'string' ? options.backlogPath : ''
   doneLimit = typeof options.doneLimit === 'number' ? options.doneLimit : 5
@@ -792,7 +808,10 @@ export const register: Register = (on, options) => {
             )}
             {isHigh ? <Text color="error">! {t.highPriority}</Text> : null}
           </Box>
-          <Button key="work" variant="primary" label={t.work} onPress={() => work($, id)} />
+          <Box flexDirection="row" flexWrap="wrap" gap={1}>
+            <Button key="work" variant="primary" label={t.work} onPress={() => work($, id)} />
+            <Button key="edit-with-claude" label={t.editWithClaude} onPress={() => editWithClaude($, id)} />
+          </Box>
           {footer}
           {!task ? <Text dimColor>{t.loadingDetails}</Text> : null}
           {task ? section(t.description, task.description, id, 'description', now) : null}
