@@ -1,6 +1,6 @@
 {
   "name": "backlog-pane",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A live Backlog.md board in a Claude Code side pane (unofficial).",
   "author": {
     "name": "Velkyss"
@@ -26,7 +26,7 @@
     "doneLimit": {
       "type": "number",
       "title": "Done tasks shown",
-      "description": "How many of the most recent tasks in the final status to list when that group is expanded.",
+      "description": "How many of the most recent tasks in the final status the board shows, and the list shows when that group is expanded.",
       "default": 5
     },
     "language": {
