@@ -1,6 +1,6 @@
 {
   "name": "backlog-pane",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "A live Backlog.md board in a Claude Code side pane (unofficial).",
   "author": {
     "name": "Velkyss"
@@ -45,6 +45,13 @@
         "es"
       ],
       "default": "auto"
+    },
+    "redmineApiKey": {
+      "type": "string",
+      "title": "Redmine API key",
+      "description": "Your Redmine API key (My account → API access key), for the projects you sync with Redmine in Integration…. Kept in secure storage; sent only to the Redmine URL each project sets.",
+      "sensitive": true,
+      "default": ""
     }
   }
 }

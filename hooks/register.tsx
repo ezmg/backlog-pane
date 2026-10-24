@@ -7,7 +7,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BoardProps, Phase, Prefs, TaskDetail, TaskSummary } from '../types'
+import type { BoardProps, Phase, Prefs, RedmineSettings, SyncConflict, SyncData, SyncView, TaskDetail, TaskSummary } from '../types'
 import {
   JsonDocumentReader,
   args,
@@ -38,6 +38,24 @@ import {
   summarize,
 } from './cli'
 import { detectLanguage, strings } from './i18n'
+import {
+  PAGE,
+  defaultPriorityMap,
+  defaultStatusMap,
+  headers as redmineHeaders,
+  issueBody,
+  issueUrl,
+  normalizeUrl,
+  readCreated,
+  readError,
+  readIssues,
+  readPriorities,
+  readStatuses,
+  toRemoteItem,
+  urls as redmineUrls,
+} from './redmine'
+import { EMPTY_SYNC, needsRead, plan, readSyncStore } from './sync'
+import type { LocalItem } from './sync'
 import type { Language, Strings } from './i18n'
 
 type Engine = EngineInterface
@@ -74,6 +92,12 @@ const newStatusAt = atom({ plugin: 'backlog-pane', key: 'newStatusAt' } as const
 // This project's colours and closed statuses, and the $.store key they are kept under.
 const prefs = atom({ plugin: 'backlog-pane', key: 'prefs' } as const, { colors: {} } as Prefs)
 const prefsKey = atom({ plugin: 'backlog-pane', key: 'prefsKey' } as const, null as string | null)
+// This project's sync with an outside tracker, and whether its view is open.
+const sync = atom(
+  { plugin: 'backlog-pane', key: 'sync' } as const,
+  { settings: null, data: EMPTY_SYNC, isSyncing: false } as SyncView,
+)
+const isManagingSync = atom({ plugin: 'backlog-pane', key: 'isManagingSync' } as const, false)
 
 type Run = { ok: true; stdout: string } | { ok: false; stderr: string }
 
@@ -82,6 +106,13 @@ let configured = ''
 let doneLimit = 5
 // The closedStatuses option: the closed statuses of a project whose own are not set yet.
 let closedOption: string[] = []
+// The redmineApiKey option (secure storage), sent in the X-Redmine-API-Key header only.
+let redmineKey = ''
+// The automatic sync while the pane is open, and whether a sync runs now.
+let syncTimer: { cancel: () => void } | null = null
+let isSyncRunning = false
+// Whether this watch has started the sync (once its first list is in).
+let isSyncArmed = false
 // The session's working folder, from session.start: where the config is looked for from.
 let cwd = ''
 let languageOption: unknown = 'auto'
@@ -191,6 +222,327 @@ async function loadPrefs($: Engine) {
   }
   await update($, prefsKey, () => key)
   await update($, prefs, () => readPrefs(stored))
+  await loadSync($)
+}
+
+/** The $.store key of the project's sync, beside its prefs'. */
+const syncKeyOf = (key: string) => key.replace(/^project:/, 'sync:')
+
+async function loadSync($: Engine) {
+  const key = await read($, prefsKey)
+  if (!key) return
+  let stored: unknown
+  try {
+    stored = await $.store.get(syncKeyOf(key))
+  } catch {
+    // Nothing kept yet.
+  }
+  const kept = readSyncStore(stored)
+  await update($, sync, now => ({ ...kept, isSyncing: now.isSyncing }))
+}
+
+async function saveSync($: Engine, change: (now: SyncView) => { settings: RedmineSettings | null; data: SyncData }) {
+  const next = await update($, sync, now => ({ ...change(now), isSyncing: now.isSyncing }))
+  const key = await read($, prefsKey)
+  if (!key) return
+  try {
+    await $.store.set(syncKeyOf(key), { settings: next.settings, data: next.data })
+  } catch (error) {
+    await update($, notice, () => String(error))
+  }
+}
+
+type Http = { ok: boolean; status: number; text: string }
+
+/** One request to Redmine with the key; a request that cannot go out is status 0. */
+async function redmineCall($: Engine, method: string, url: string, body?: unknown): Promise<Http> {
+  try {
+    const answer = await $.http.fetch(url, {
+      method,
+      headers: redmineHeaders(redmineKey, body !== undefined),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return { ok: answer.ok, status: answer.status, text: answer.text }
+  } catch (error) {
+    return { ok: false, status: 0, text: String(error) }
+  }
+}
+
+function problemOf(t: Strings, answer: Http, project: string): string {
+  if (answer.status === 0) return t.unreachable(errorLine(answer.text, '?'))
+  if (answer.status === 401) return t.unauthorized
+  if (answer.status === 403) return t.forbidden
+  if (answer.status === 404) return t.noProject(project)
+  return t.unexpected(readError(answer.status, answer.text))
+}
+
+/** Runs one sync now, unless one runs already; what it did is the notice. */
+async function runSync($: Engine) {
+  const view = await read($, sync)
+  const settings = view.settings
+  if (!settings || isSyncRunning) return
+  const t = await text($)
+  const base = normalizeUrl(settings.url)
+  const problem = !base ? t.badUrl : !settings.project.trim() ? t.badProject : !redmineKey ? t.apiKeyMissing : null
+  if (problem || !base) {
+    await update($, notice, () => problem ?? t.badUrl)
+    return
+  }
+  isSyncRunning = true
+  await update($, sync, now => ({ ...now, isSyncing: true }))
+  try {
+    const failed = await syncOnce($, settings, base, t)
+    if (failed) {
+      await saveSync($, now => ({ settings: now.settings, data: { ...now.data, lastError: failed } }))
+      await update($, notice, () => failed)
+    }
+  } finally {
+    isSyncRunning = false
+    await update($, sync, now => ({ ...now, isSyncing: false }))
+  }
+}
+
+/** One sync with Redmine; answers what went wrong, if it could not run. */
+async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: Strings): Promise<string | undefined> {
+  const project = settings.project.trim()
+  const found = await redmineCall($, 'GET', redmineUrls.project(base, project))
+  if (!found.ok) return problemOf(t, found, project)
+  const statusAnswer = await redmineCall($, 'GET', redmineUrls.statuses(base))
+  const remoteStatuses = statusAnswer.ok ? readStatuses(statusAnswer.text) : undefined
+  if (!remoteStatuses) return statusAnswer.ok ? t.unexpected('issue_statuses') : problemOf(t, statusAnswer, project)
+  const priorityAnswer = await redmineCall($, 'GET', redmineUrls.priorities(base))
+  const remotePriorities = (priorityAnswer.ok ? readPriorities(priorityAnswer.text) : undefined) ?? []
+  const issues = []
+  for (let offset = 0; ; offset += PAGE) {
+    const answer = await redmineCall($, 'GET', redmineUrls.issues(base, project, offset))
+    const page = answer.ok ? readIssues(answer.text) : undefined
+    if (!page) return answer.ok ? t.unexpected('issues') : problemOf(t, answer, project)
+    issues.push(...page.issues)
+    if (page.issues.length < PAGE || issues.length >= page.total) break
+  }
+
+  // The maps: the person's choices over the defaults for what is new.
+  const order = await read($, statuses)
+  const levels = await read($, priorities)
+  const statusMap = { ...defaultStatusMap(remoteStatuses, order), ...settings.statusMap }
+  const priorityMap = { ...defaultPriorityMap(remotePriorities, levels), ...settings.priorityMap }
+
+  const listed = await backlog($, args.list())
+  const tasksNow = listed.ok ? readTaskList(safeParse(listed.stdout)) : undefined
+  if (!tasksNow) return errorLine(listed.ok ? '' : listed.stderr, t.listFailed)
+
+  const view = await read($, sync)
+  const data = view.data
+  const issueUrls = new Set(issues.map(issue => issueUrl(base, issue.id)))
+  const linked = new Set(Object.values(data.links).map(link => link.taskId))
+  const local: LocalItem[] = []
+  for (const task of tasksNow) {
+    const fields: LocalItem['fields'] = { title: task.title, status: task.status, priority: task.priority?.toLowerCase() ?? null }
+    const isLinked = linked.has(task.id) || task.references.some(ref => issueUrls.has(ref))
+    if (isLinked && needsRead(task.updatedAt, data.lastSync)) {
+      const run = await backlog($, args.view(task.id))
+      const detail = run.ok ? readTaskView(safeParse(run.stdout)) : undefined
+      if (detail) fields.description = detail.description ?? ''
+    }
+    local.push({ id: task.id, references: task.references, fields })
+  }
+
+  const fallback = order[0] ?? ''
+  const remote = issues.map(issue => toRemoteItem(base, issue, statusMap, priorityMap, fallback))
+  const planned = plan({
+    remote,
+    local,
+    links: data.links,
+    conflicts: data.conflicts,
+    mode: settings.mode,
+    excluded: settings.excluded,
+    createsRemote: true,
+  })
+
+  const meta = Object.fromEntries(issues.map(issue => [String(issue.id), { statusId: issue.statusId, priorityId: issue.priorityId }]))
+  const maps = { status: statusMap, priority: priorityMap }
+  const lists = { statuses: remoteStatuses, priorities: remotePriorities }
+  const links = { ...planned.links }
+  const warnings: string[] = []
+  let fromRemote = 0
+  let toRemote = 0
+  for (const action of planned.actions) {
+    if (action.kind === 'create-local') {
+      const run = await backlog($, args.createFrom(action.fields, action.url))
+      const id = run.ok ? createdId(run.stdout) : undefined
+      if (id) {
+        links[action.key] = { taskId: id, base: action.fields }
+        fromRemote++
+      } else {
+        delete links[action.key]
+        warnings.push(t.localFailed(`#${action.key}`, errorLine(run.ok ? '' : run.stderr, '?')))
+      }
+    } else if (action.kind === 'update-local') {
+      const run = await backlog($, args.editFields(action.taskId, action.change))
+      if (run.ok) fromRemote++
+      else {
+        // Tried again next time: the old base still differs.
+        const old = data.links[action.key]
+        if (old) links[action.key] = old
+        warnings.push(t.localFailed(action.taskId, errorLine(run.stderr, '?')))
+      }
+    } else if (action.kind === 'update-remote') {
+      const body = issueBody(action.change, maps, lists, meta[action.key])
+      const old = data.links[action.key]?.base
+      const link = links[action.key]
+      for (const field of body.skipped) {
+        const value = field === 'status' ? action.change.status : action.change.priority
+        warnings.push(field === 'status' ? t.statusNotSent(action.taskId, value ?? '') : t.priorityNotSent(action.taskId, value ?? ''))
+        if (old && link) link.base = { ...link.base, [field]: old[field as 'status' | 'priority'] }
+      }
+      if (Object.keys(body.issue).length === 0) continue
+      const answer = await redmineCall($, 'PUT', redmineUrls.issue(base, action.key), { issue: body.issue })
+      if (answer.ok) toRemote++
+      else {
+        if (old && link) link.base = old
+        warnings.push(t.refused(action.key, answer.status === 0 ? errorLine(answer.text, '?') : readError(answer.status, answer.text)))
+      }
+    } else {
+      const run = await backlog($, args.view(action.taskId))
+      const detail = run.ok ? readTaskView(safeParse(run.stdout)) : undefined
+      const fields = { ...action.fields, description: detail?.description ?? '' }
+      const body = issueBody(fields, maps, lists)
+      const answer = await redmineCall($, 'POST', redmineUrls.create(base), { issue: { project_id: project, ...body.issue } })
+      const id = answer.ok ? readCreated(answer.text) : undefined
+      if (id === undefined) {
+        warnings.push(t.refused(action.taskId, answer.status === 0 ? errorLine(answer.text, '?') : readError(answer.status, answer.text)))
+        continue
+      }
+      await backlog($, args.addRef(action.taskId, issueUrl(base, id)))
+      links[String(id)] = { taskId: action.taskId, base: fields }
+      toRemote++
+    }
+  }
+
+  const now = new Date(await $.clock.now()).toISOString()
+  await saveSync($, current => ({
+    settings: current.settings ? { ...current.settings, statusMap, priorityMap } : current.settings,
+    data: {
+      links,
+      conflicts: planned.conflicts,
+      meta,
+      statuses: remoteStatuses,
+      priorities: remotePriorities,
+      lastSync: now,
+      warnings,
+    },
+  }))
+  await update($, notice, () => t.syncDone({ fromRemote, toRemote, conflicts: planned.conflicts.length }))
+  return undefined
+}
+
+/** Starts a sync in the background; it ends with the module like the watch. */
+function startSync($: Engine) {
+  runSync($).catch(() => {
+    // Aborted by an unload or a reload.
+  })
+}
+
+/** The automatic sync, every `intervalMin` minutes while the pane is open. */
+async function startSyncTimer($: Engine) {
+  stopSyncTimer()
+  const settings = (await read($, sync)).settings
+  if (!settings || settings.intervalMin <= 0) return
+  syncTimer = $.clock.every(settings.intervalMin * 60_000, () => startSync($))
+}
+
+function stopSyncTimer() {
+  syncTimer?.cancel()
+  syncTimer = null
+}
+
+/** Settles one conflict: the side picked gives its value to the other. */
+async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote' | 'local') {
+  const t = await text($)
+  const view = await read($, sync)
+  const settings = view.settings
+  const base = settings ? normalizeUrl(settings.url) : undefined
+  if (!settings || !base) return
+  const value = side === 'remote' ? conflict.remote : conflict.local
+  if (side === 'remote') {
+    const run = await backlog($, args.editFields(conflict.taskId, { [conflict.field]: value ?? '' }))
+    if (!run.ok) {
+      await update($, notice, () => t.localFailed(conflict.taskId, errorLine(run.stderr, '?')))
+      return
+    }
+  } else {
+    const body = issueBody(
+      { [conflict.field]: value ?? '' },
+      { status: settings.statusMap, priority: settings.priorityMap },
+      { statuses: view.data.statuses, priorities: view.data.priorities },
+      view.data.meta[conflict.key],
+    )
+    if (body.skipped.length > 0) {
+      await update($, notice, () =>
+        conflict.field === 'status' ? t.statusNotSent(conflict.taskId, value ?? '') : t.priorityNotSent(conflict.taskId, value ?? ''),
+      )
+      return
+    }
+    const answer = await redmineCall($, 'PUT', redmineUrls.issue(base, conflict.key), { issue: body.issue })
+    if (!answer.ok) {
+      await update($, notice, () => t.refused(conflict.key, answer.status === 0 ? errorLine(answer.text, '?') : readError(answer.status, answer.text)))
+      return
+    }
+  }
+  await saveSync($, now => {
+    const link = now.data.links[conflict.key]
+    const links = link ? { ...now.data.links, [conflict.key]: { ...link, base: { ...link.base, [conflict.field]: value ?? '' } } } : now.data.links
+    const conflicts = now.data.conflicts.filter(one => !(one.key === conflict.key && one.field === conflict.field))
+    return { settings: now.settings, data: { ...now.data, links, conflicts } }
+  })
+  await update($, notice, () => null)
+}
+
+/** Picks the tracker; Redmine starts read only, every 5 minutes, the tasks there now kept out. */
+async function setTracker($: Engine, value: string) {
+  if (value !== 'redmine') {
+    stopSyncTimer()
+    const t = await text($)
+    await saveSync($, now => ({ settings: null, data: now.data }))
+    await update($, notice, () => t.disconnected)
+    return
+  }
+  const existing = (await read($, tasks)).map(task => task.id)
+  await saveSync($, now => ({
+    settings: now.settings ?? {
+      provider: 'redmine',
+      url: '',
+      project: '',
+      mode: 'read',
+      intervalMin: 5,
+      statusMap: {},
+      priorityMap: {},
+      excluded: existing,
+    },
+    data: now.data,
+  }))
+}
+
+async function setSyncSettings($: Engine, change: Partial<RedmineSettings>) {
+  const t = await text($)
+  if (change.url !== undefined && !normalizeUrl(change.url)) {
+    await update($, notice, () => t.badUrl)
+    return
+  }
+  await saveSync($, now => ({
+    settings: now.settings ? { ...now.settings, ...change, url: change.url !== undefined ? (normalizeUrl(change.url) ?? '') : now.settings.url } : null,
+    data: now.data,
+  }))
+  await update($, notice, () => null)
+  if (change.intervalMin !== undefined && active) await startSyncTimer($)
+}
+
+async function openSync($: Engine) {
+  await update($, isManagingSync, () => true)
+  await update($, isManagingStatuses, () => false)
+  await update($, isCreating, () => false)
+  await update($, notice, () => null)
+  await loadSync($)
 }
 
 /** The project's closed statuses: its own, else the closedStatuses option's. */
@@ -241,6 +593,12 @@ async function loadDetail($: Engine, id: string) {
 async function receive($: Engine, list: TaskSummary[]) {
   await update($, tasks, () => list)
   await update($, phase, () => ({ kind: 'ready' }) as Phase)
+  // The first list of this watch: sync once now, then on the timer.
+  if (!isSyncArmed && (await read($, sync)).settings) {
+    isSyncArmed = true
+    startSync($)
+    await startSyncTimer($)
+  }
   const id = await read($, selectedId)
   if (!id) return
   const shown = await read($, detail)
@@ -313,6 +671,8 @@ function startWatch($: Engine) {
 }
 
 function stopWatch() {
+  stopSyncTimer()
+  isSyncArmed = false
   if (!active) return
   active.isStopped = true
   active.stop()
@@ -668,6 +1028,7 @@ export const register: Register = (on, options) => {
   configured = typeof options.backlogPath === 'string' ? options.backlogPath : ''
   doneLimit = typeof options.doneLimit === 'number' ? options.doneLimit : 5
   closedOption = parseClosed(options.closedStatuses)
+  redmineKey = typeof options.redmineApiKey === 'string' ? options.redmineApiKey.trim() : ''
   languageOption = options.language
   language = null
 
@@ -825,6 +1186,170 @@ export const register: Register = (on, options) => {
     const order = await read($, statuses)
     const kept = await read($, prefs)
     const closed = closedOf(kept)
+
+    const synced = await read($, sync)
+    const syncTime = synced.data.lastSync ? clockTime(synced.data.lastSync, language ?? 'en') : null
+
+    if (await read($, isManagingSync)) {
+      const settings = synced.settings
+      const data = synced.data
+      const levels = await read($, priorities)
+      const close = () => update($, isManagingSync, () => false)
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="row" gap={1}>
+            <Button key="sync-back" plain label={t.back} onPress={close} />
+            <Text bold>{t.integrationTitle}</Text>
+          </Box>
+          {footer}
+          {Select ? (
+            <Select
+              key="sync-tracker"
+              label={t.tracker}
+              value={settings ? 'redmine' : 'none'}
+              options={[
+                { value: 'none', label: t.noTracker },
+                { value: 'redmine', label: 'Redmine' },
+              ]}
+              onSelect={value => setTracker($, value)}
+            />
+          ) : (
+            <Text>
+              {t.tracker}: {settings ? 'Redmine' : t.noTracker}
+            </Text>
+          )}
+          {settings ? (
+            <Box flexDirection="column" gap={1}>
+              {Input && Select ? (
+                <Box flexDirection="column">
+                  <Input
+                    key="sync-url"
+                    label={t.redmineUrl}
+                    placeholder={t.urlPlaceholder}
+                    value={settings.url}
+                    submitLabel={t.save}
+                    onSubmit={value => setSyncSettings($, { url: value })}
+                  />
+                  <Input
+                    key="sync-project"
+                    label={t.redmineProject}
+                    placeholder={t.projectPlaceholder}
+                    value={settings.project}
+                    submitLabel={t.save}
+                    onSubmit={value => setSyncSettings($, { project: value.trim() })}
+                  />
+                  <Select
+                    key="sync-mode"
+                    label={t.mode}
+                    value={settings.mode}
+                    options={[
+                      { value: 'read', label: t.modeRead },
+                      { value: 'both', label: t.modeBoth },
+                    ]}
+                    onSelect={value => setSyncSettings($, { mode: value === 'both' ? 'both' : 'read' })}
+                  />
+                  <Select
+                    key="sync-interval"
+                    label={t.every}
+                    value={String(settings.intervalMin)}
+                    options={[
+                      { value: '0', label: t.manualOnly },
+                      ...[5, 15, 30, 60].map(n => ({ value: String(n), label: t.everyMinutes(n) })),
+                    ]}
+                    onSelect={value => setSyncSettings($, { intervalMin: Number(value) })}
+                  />
+                </Box>
+              ) : null}
+              <Text dimColor>
+                {settings.url || '—'} · {settings.project || '—'} · {settings.mode === 'both' ? t.bothShort : t.readOnlyShort}
+              </Text>
+              <Text dimColor={!!redmineKey} color={redmineKey ? undefined : 'warning'}>
+                {redmineKey ? t.apiKeySet : t.apiKeyMissing}
+              </Text>
+              <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                <Button
+                  key="sync-now"
+                  variant="primary"
+                  label={synced.isSyncing ? t.syncing : t.syncNow}
+                  onPress={() => runSync($)}
+                />
+                <Button key="sync-remove" label={t.disconnect} onPress={() => setTracker($, 'none')} />
+              </Box>
+              <Text dimColor>{syncTime ? t.lastSync(syncTime) : t.notSynced}</Text>
+              {data.lastError ? <Text color="error">{data.lastError}</Text> : null}
+              {data.warnings.map(warning => (
+                <Text color="warning">{warning}</Text>
+              ))}
+              {data.conflicts.length > 0 ? (
+                <Box flexDirection="column">
+                  <Text bold color="warning">
+                    {t.conflictsTitle}
+                  </Text>
+                  {data.conflicts.map((conflict, i) => (
+                    <Box flexDirection="column">
+                      <Text>{t.conflictLine(conflict.taskId, t.fieldNames[conflict.field] ?? conflict.field)}</Text>
+                      <Text dimColor>
+                        {t.inRedmine}: {conflict.remote?.trim() ? conflict.remote : t.empty}
+                      </Text>
+                      <Text dimColor>
+                        {t.inBacklog}: {conflict.local?.trim() ? conflict.local : t.empty}
+                      </Text>
+                      <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                        <Button key={`conflict-remote-${i}`} label={t.useRemote} onPress={() => resolveConflict($, conflict, 'remote')} />
+                        <Button key={`conflict-local-${i}`} label={t.useLocal} onPress={() => resolveConflict($, conflict, 'local')} />
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              ) : null}
+              {settings.mode === 'both' && settings.excluded.length > 0 ? (
+                <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                  <Text dimColor>{t.excludedNote(settings.excluded.length)}</Text>
+                  <Button key="sync-include-old" plain label={t.includeOld} onPress={() => setSyncSettings($, { excluded: [] })} />
+                </Box>
+              ) : null}
+              {Select && data.statuses.length > 0 ? (
+                <Box flexDirection="column">
+                  <Text bold>{t.statusMapping}</Text>
+                  {data.statuses.map(status => (
+                    <Select
+                      key={`sync-status-${status.id}`}
+                      label={status.name}
+                      value={settings.statusMap[String(status.id)] ?? order[0] ?? ''}
+                      options={order.map(one => ({ value: one, label: one }))}
+                      onSelect={value =>
+                        setSyncSettings($, { statusMap: { ...settings.statusMap, [String(status.id)]: value } })
+                      }
+                    />
+                  ))}
+                </Box>
+              ) : null}
+              {Select && data.priorities.length > 0 ? (
+                <Box flexDirection="column">
+                  <Text bold>{t.priorityMapping}</Text>
+                  {data.priorities.map(priority => (
+                    <Select
+                      key={`sync-priority-${priority.id}`}
+                      label={priority.name}
+                      value={settings.priorityMap[String(priority.id)] ?? ''}
+                      options={[
+                        { value: '', label: t.leaveAlone },
+                        ...levels.map(one => ({ value: one, label: t.priorityName[one.toLowerCase()] ?? one })),
+                      ]}
+                      onSelect={value =>
+                        setSyncSettings($, { priorityMap: { ...settings.priorityMap, [String(priority.id)]: value } })
+                      }
+                    />
+                  ))}
+                </Box>
+              ) : null}
+              {data.statuses.length === 0 ? <Text dimColor>{t.mappingLater}</Text> : null}
+              <Text dimColor>{t.syncNote}</Text>
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
 
     if (await read($, isManagingStatuses)) {
       const all = await read($, tasks)
@@ -1157,7 +1682,26 @@ export const register: Register = (on, options) => {
             <Button key="new-task-open" label={t.newTask} onPress={() => update($, isCreating, () => true)} />
           ) : null}
           <Button key="statuses-open" label={t.manageStatuses} onPress={() => openStatuses($)} />
+          <Button key="sync-open" label={t.integration} onPress={() => openSync($)} />
         </Box>
+        {synced.settings ? (
+          <Box flexDirection="row" flexWrap="wrap" gap={1}>
+            <Text dimColor color={synced.data.conflicts.length > 0 || synced.data.lastError ? 'warning' : undefined}>
+              {t.syncLine(
+                synced.settings.mode === 'both' ? t.bothShort : t.readOnlyShort,
+                syncTime,
+                synced.data.conflicts.length,
+              )}
+            </Text>
+            <Button
+              key="sync-now-board"
+              plain
+              dimColor
+              label={synced.isSyncing ? t.syncing : t.syncNow}
+              onPress={() => runSync($)}
+            />
+          </Box>
+        ) : null}
         {footer}
         {list.length === 0 ? <Text dimColor>{t.noTasks}</Text> : null}
         {hasBoard && Client ? (
@@ -1233,6 +1777,15 @@ function board(groups: ReturnType<typeof groupTasks>, width: number, t: Strings)
     })),
     width,
     hint: t.boardHint,
+  }
+}
+
+/** A sync's time as the person reads it: hours and minutes, in the pane's language. */
+function clockTime(iso: string, lang: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' })
+  } catch {
+    return iso.slice(11, 16)
   }
 }
 
