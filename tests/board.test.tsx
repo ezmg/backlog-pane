@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { columnHeight, columnWidth, fit, hit, locate, nextOpenColumn } from '../hooks/board'
+import { cardLine, columnHeight, columnWidth, fit, hit, locate, nextOpenColumn } from '../hooks/board'
 import type { BoardProps } from '../types'
 import { PANE, open, world } from './fixtures'
 import type { FakeTask } from './fixtures'
@@ -119,6 +119,74 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.pointer({ type: 'up', x: DOING, y: FIRST_CARD, button: 'left', in: 'board' })
     expect(await ui.find({ key: 'back' })).toBeDefined()
     expect(await ui.find({ type: 'Markdown', text: 'Parse the **stream**.' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`${surface}: a dragged card is let go of, so a later click does not move it again`, async ($, on) => {
+    const { clock, edits } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.resize(SIZE)
+    await ui.pointer({ type: 'down', x: TODO, y: FIRST_CARD, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'move', x: DOING, y: FIRST_CARD, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: DOING, y: FIRST_CARD, button: 'left', in: 'board' })
+    expect(edits()).toEqual([['task', 'edit', 'BL-2', '--status', 'In Progress']])
+    expect((await ui.find(title(/Add login/)))?.props.inverse).toBe(false)
+    // A click on an empty spot of another column, later.
+    await ui.pointer({ type: 'down', x: DONE, y: 11, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: DONE, y: 11, button: 'left', in: 'board' })
+    // And a click on the moved card: it selects it, it does not open it.
+    await ui.pointer({ type: 'down', x: DOING, y: SECOND_CARD, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: DOING, y: SECOND_CARD, button: 'left', in: 'board' })
+    expect(edits()).toHaveLength(1)
+    expect(await ui.find({ key: 'back' })).toBe(undefined)
+    await ui.unmount()
+  })
+
+  test(`${surface}: a card moved by click is let go of too`, async ($, on) => {
+    const { clock, edits } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.resize(SIZE)
+    await ui.pointer({ type: 'down', x: TODO, y: FIRST_CARD, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: TODO, y: FIRST_CARD, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'down', x: DONE, y: SLOT, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: DONE, y: SLOT, button: 'left', in: 'board' })
+    expect(edits()).toEqual([['task', 'edit', 'BL-2', '--status', 'Done']])
+    await ui.pointer({ type: 'down', x: DOING, y: 11, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: DOING, y: 11, button: 'left', in: 'board' })
+    expect(edits()).toHaveLength(1)
+    await ui.unmount()
+  })
+
+  test(`${surface}: a click on an empty spot lets go of the selected card`, async ($, on) => {
+    const { clock, edits } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.resize(SIZE)
+    await ui.pointer({ type: 'down', x: TODO, y: FIRST_CARD, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: TODO, y: FIRST_CARD, button: 'left', in: 'board' })
+    expect((await ui.find(title(/Add login/)))?.props.inverse).toBe(true)
+    // An empty spot of its own column: nothing moves, the card is let go of.
+    await ui.pointer({ type: 'down', x: TODO, y: SLOT, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: TODO, y: SLOT, button: 'left', in: 'board' })
+    expect((await ui.find(title(/Add login/)))?.props.inverse).toBe(false)
+    await ui.pointer({ type: 'down', x: DONE, y: SLOT, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: DONE, y: SLOT, button: 'left', in: 'board' })
+    expect(edits()).toEqual([])
+    await ui.unmount()
+  })
+
+  test(`${surface}: a card picked with the keys is not moved by a click`, async ($, on) => {
+    const { clock, edits } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.resize(SIZE)
+    await ui.key({ key: 'down', in: 'board' })
+    expect((await ui.find(title(/Add login/)))?.props.inverse).toBe(true)
+    await ui.pointer({ type: 'down', x: DONE, y: SLOT, button: 'left', in: 'board' })
+    await ui.pointer({ type: 'up', x: DONE, y: SLOT, button: 'left', in: 'board' })
+    expect(edits()).toEqual([])
     await ui.unmount()
   })
 
@@ -263,7 +331,7 @@ test('Spanish: the board hint', { options: { language: 'es' } }, async ($, on) =
 })
 
 describe('board layout', () => {
-  const card = (id: string, title: string, isHigh = false) => ({ id, title, isHigh, meta: id })
+  const card = (id: string, title: string, isHigh = false) => ({ id, title, isHigh, criteria: null })
   const props: BoardProps = {
     columns: [
       { status: 'To Do', color: 'suggestion', total: 2, isClosed: false, cards: [card('A-1', 'a'), card('A-2', 'b', true)] },
@@ -310,6 +378,13 @@ describe('board layout', () => {
     expect(nextOpenColumn(props, 0, 1)).toBe(2)
     expect(nextOpenColumn(props, 2, -1)).toBe(0)
     expect(nextOpenColumn(props, 0, -1)).toBe(undefined)
+  })
+
+  test('the second line keeps the criteria count in a narrow column', async () => {
+    expect(cardLine('BL-1', '1/2', 20)).toBe('BL-1 · 1/2')
+    expect(cardLine('TASK-12', '0/2', 11)).toBe('TASK-12 0/2')
+    expect(cardLine('TASK-123', '10/12', 11)).toBe('TASK… 10/12')
+    expect(cardLine('TASK-123', null, 6)).toBe('TASK-…')
   })
 
   test('long titles are cut with an ellipsis', async () => {
