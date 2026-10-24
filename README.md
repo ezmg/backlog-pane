@@ -57,6 +57,9 @@ for you**.
 
   Both drafts replace an empty prompt box. If the box already holds text, the draft goes
   below it. Nothing is submitted.
+- **Redmine sync.** **Integration…** links the project to a Redmine project, read only
+  or both ways. Issues become tasks and stay in step field by field, with a button and
+  every few minutes. See [Integration (Redmine)](#integration-redmine).
 - **English and Spanish.** The pane, the command and both drafts. See the `language`
   option.
 - **CLI only, with one exception.** Every change to a task runs a `backlog` command
@@ -125,6 +128,77 @@ mod (keyed by the project's config file), because Backlog.md's config has no pla
 them. They are yours alone: they are not in the repository, so teammates don't share
 them, and a project moved to another folder starts afresh. The `closedStatuses` option
 (below) is only the starting value for a project where no **Closed** box was ever ticked.
+
+## Integration (Redmine)
+
+Each project can be linked to **one** outside tracker. Redmine is the first; Jira and Excel
+come next. The tasks are copied into Backlog.md with the `backlog` CLI, so the board,
+Claude and Backlog.md's own tools all see them as ordinary tasks.
+
+**Set it up:**
+
+1. Get your API key in Redmine (**My account → API access key**; the server must have
+   *Enable REST web service* on).
+2. Put it in the plugin's **Redmine API key** option (`/plugin`, or `/config` when the mod
+   loads from a folder). It is a sensitive option, so Claude Code keeps it in secure
+   storage, not in `settings.json`.
+3. In the pane, press **Integration…**, pick **Redmine** as the tracker, and type the
+   server's URL (`https://redmine.example.com`) and the project's identifier (as in its
+   URL, for example `my-app`).
+4. Pick the **Mode**, which **Issues** (all of the project, or only those assigned to
+   you) and how often to **Sync**, then **Sync now**.
+
+**Modes:**
+
+- **Read only (Redmine → Backlog.md)**, the default: nothing is ever written to Redmine.
+  A field changed in Redmine overwrites the task's. A change you make only in Backlog.md
+  stays there, until Redmine changes that field.
+- **Both ways:** a field changed on one side is copied to the other. New Backlog.md tasks
+  are created in Redmine too, and get the new issue's URL in their references.
+
+**What syncs:** every issue of the project, open and closed, not its subprojects'; or, with
+**Only those assigned to me**, just the ones assigned to the API key's owner (you, or a
+group you are in). For each
+one, the title (subject), status, priority and description. Each new task gets the issue's
+URL (`…/issues/42`) in its references, which is how the pane finds the pair again; a task
+you already pointed at an issue that way is adopted instead of copied twice, with
+Redmine's values winning.
+
+**Status and priority mappings.** After the first sync, **Integration…** lists each
+Redmine status and priority with the Backlog.md one it lands in. The pane guesses them
+(same name first; then closed ones in the final status, *In Progress*-like ones in yours,
+the rest in the first status; *Urgent*/*High* → High, *Normal* → Medium, *Low* → Low) and
+you change any of them. A priority set to **— (left alone)** is not synced. In both-ways
+mode, a Backlog.md status that no Redmine one maps to is not sent, and the pane says so.
+
+**Conflicts.** The pane keeps what both sides agreed at the last sync. When the same field
+changed on both sides, to different values, neither side is touched for that field: the
+board shows *1 conflict*, and **Integration…** shows both values with **Use Redmine's** and
+**Use Backlog.md's**.
+
+**View: all / only mine.** Beside **Sync now** on the board, a button switches the view at
+once, with no call to Redmine: *only mine* hides the tasks whose issue, at the last sync,
+was assigned to someone else, to nobody, or was not listed; tasks with no issue always
+show. It is separate from the **Issues** option, which decides what is synced: you can
+sync every issue and still look at yours only. The view is kept per project.
+
+**When:** **Sync now** in **Integration…** or on the board's sync line, and on its own every
+5, 15, 30 or 60 minutes (5 by default), or **Only with the button**. The sync runs only
+while the pane is open; the first one starts when it opens.
+
+**Nothing is deleted** on either side. An issue that was deleted, moved out of the
+project, or (with *only mine*) assigned to someone else leaves its task as it was, no
+longer synced; it syncs again if it comes back. With *only mine* in both-ways mode, a new
+Backlog.md task is created in Redmine assigned to you, so it stays in your list. **Disconnect** (tracker **None**) stops the sync and
+keeps the tasks.
+
+**Tasks from before.** In both-ways mode, the tasks that were in the project when you set
+Redmine up are not sent to it, so linking a project does not flood Redmine. **Send them
+too** sends them.
+
+Settings, links and mappings are kept **per project** in Claude Code's store for the mod,
+like the colours, so they are yours alone. The key is per user: one key for every project
+you sync, sent only in the `X-Redmine-API-Key` header to the URL each project sets.
 
 ## Editing long text
 
@@ -241,6 +315,7 @@ To close the pane, click its close mark or press `ctrl+x` then `x`. Closing it s
 | `backlogPath` | *(empty)* | Full path to the `backlog` executable. When empty, the mod tries `backlog` on PATH. On Windows it then tries the native binaries npm and bun install globally. |
 | `doneLimit` | `5` | How many of the most recent tasks in the final status (and in each closed status) the board shows, and the list shows when that group is unfolded. |
 | `closedStatuses` | *(empty)* | Optional. Statuses that start as closed in a project where you have never ticked a **Closed** box in **Statuses…**, separated by commas (for example `Cancelled`). Once you tick or untick one, the project keeps its own list. |
+| `redmineApiKey` | *(empty)* | Your Redmine API key, for the projects you link to Redmine in **Integration…**. Sensitive: kept in secure storage, and sent only to the Redmine URL each project sets. |
 | `language` | `auto` | `en` (English), `es` (Spanish), or `auto`. With `auto` the mod uses the first of these that is set: Claude Code's `language` setting (free text such as `Español`, `Spanish` or `English`), then `LC_ALL`, `LC_MESSAGES`, `LANG`, then the system locale. If none is set, it uses English. Any language other than Spanish shows English. |
 
 Change them under the plugin's settings in `/plugin`. In a session that loads the mod from
@@ -311,6 +386,12 @@ things to know:
 | Edit a criterion | `backlog task edit <id> --acceptance-criteria <1st> --acceptance-criteria <2nd> …` (the whole list, in order), then `--check-ac <n>` if it was ticked |
 | Description / plan | `backlog task edit <id> -d <text>` / `--plan <text>` |
 | Editor | `backlog config get defaultEditor`, then the editor on a temp file |
+| Redmine: read | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 a page), plus `&assigned_to_id=me` for only mine |
+| Redmine: copy an issue in | `backlog task create <title> -s <status> --priority <p> -d <text> --ref <issue URL>` |
+| Redmine: take a change | `backlog task edit <id> -t … -s … --priority … -d …` (only the fields that changed) |
+| Redmine: who you are | `GET /users/current.json?include=groups`, for the view and for assigning new issues |
+| Redmine: send a change (both ways) | `PUT /issues/<n>.json` with the fields that changed |
+| Redmine: send a new task (both ways) | `POST /issues.json` (with only mine, assigned to you), then `backlog task edit <id> --add-ref <issue URL>` |
 
 The editing commands were checked against Backlog.md 1.55.3. Rewriting the criteria list
 keeps the ticks of the criteria whose text did not change.
@@ -339,6 +420,11 @@ the pane shows the error and a **Retry** button.
   line, and a comment on those lines is lost. Task counts leave out drafts and archived
   tasks, so a status an archived task is in can still be deleted. The pane does not
   reorder or rename existing statuses: edit the config for that.
+- **Redmine:** acceptance criteria, the plan, notes, comments, assignees, trackers,
+  versions and custom fields are not synced. Descriptions go across as they are, with no
+  conversion between Redmine's Textile (or Markdown) and Backlog.md's Markdown. A Redmine
+  workflow can refuse a status change; the pane shows Redmine's reason and tries again on
+  the next sync. The sync runs only while the pane is open. Jira and Excel are not there yet.
 - **Not yet:** plan approval, automatic sync when Claude finishes, milestones and the
   definition of done. Subtasks, dependencies, labels and assignees are not shown.
 - The live list covers what `task list` returns, so drafts and archived tasks are not
@@ -363,9 +449,12 @@ the pane shows the error and a **Retry** button.
 hooks/register.tsx                command, pane, watch loop and actions
 hooks/board.tsx                   the board's Client surface module (terminal, desktop)
 hooks/cli.ts                      pure helpers: commands, JSON stream reader, grouping, colours, editor
+hooks/sync.ts                     pure sync core: three-way merge per field, the plan of each sync
+hooks/redmine.ts                  pure Redmine adapter: URLs, parsing, default mappings, issue bodies
 hooks/i18n.ts                     English and Spanish strings, language detection
 types/index.d.ts                  the $.state contract, the board's props, Backlog.md shapes
-tests/                            claude plugin test suites (fixtures.ts is the fake world, with a fake config)
+tests/                            claude plugin test suites (fixtures.ts is the fake world, with a fake config;
+                                  fake-redmine.ts a Redmine in memory)
 ```
 
 Run the mod from a working copy for one session:
@@ -416,6 +505,8 @@ cover:
 - each status's colour and its **Closed** box, kept per project, and cards taking their status's colour;
 - every editing control, the inline field and the external editor;
 - both drafts;
+- the Redmine sync: the merge, read only and both ways, only mine (synced and viewed), conflicts, mappings, refused
+  writes, the timer, a missing or wrong key, a missing project and an unreachable server;
 - the missing-CLI, uninitialized, failing-watch and headless states.
 
 They run on the terminal, desktop, VS Code and mobile surfaces where each applies, and give

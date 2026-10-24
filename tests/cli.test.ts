@@ -31,6 +31,7 @@ const task = (id: string, status: string, updatedAt: string | null = null): Task
   status,
   priority: null,
   labels: [],
+  references: [],
   acceptanceCriteriaCompleted: 0,
   acceptanceCriteriaCount: 0,
   createdAt: '2026-01-01T00:00:00Z',
