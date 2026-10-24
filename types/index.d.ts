@@ -95,6 +95,8 @@ export type RedmineSettings = {
   mode: SyncMode
   /** Only the issues assigned to the key's owner; new tasks sent to Redmine are assigned to them. */
   onlyMine: boolean
+  /** The board shows every task, or hides those linked to issues not assigned to the key's owner. */
+  view: 'all' | 'mine'
   /** Minutes between automatic syncs while the pane is open; 0: only by the button. */
   intervalMin: number
   /** Redmine status id → Backlog.md status, and priority id → Backlog.md priority. */
@@ -109,7 +111,9 @@ export type SyncData = {
   links: Record<string, SyncLink>
   conflicts: SyncConflict[]
   /** Each issue's Redmine status and priority ids, from the last read. */
-  meta: Record<string, { statusId: number; priorityId: number | null }>
+  meta: Record<string, { statusId: number; priorityId: number | null; assigneeId?: number | null }>
+  /** The key's owner and their groups, as Redmine said at the last sync. */
+  me?: number[]
   statuses: { id: number; name: string; isClosed: boolean }[]
   priorities: { id: number; name: string; isDefault: boolean }[]
   lastSync?: string

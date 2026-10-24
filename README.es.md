@@ -189,6 +189,13 @@ el mismo campo cambió en los dos lados, con valores distintos, no se toca ese c
 ninguno: el tablero muestra *1 conflicto*, e **Integración…** enseña los dos valores con
 **Usar el de Redmine** y **Usar el de Backlog.md**.
 
+**Ver: todas / solo mías.** Junto a **Sincronizar ahora**, en el tablero, un botón cambia la
+vista al momento, sin llamar a Redmine: *solo mías* oculta las tareas cuya petición, en la
+última sincronización, estaba asignada a otra persona, a nadie, o no aparecía; las tareas
+sin petición se ven siempre. Es independiente de la opción **Peticiones**, que decide qué
+se sincroniza: puedes sincronizar todas y ver solo las tuyas. La vista se guarda por
+proyecto.
+
 **Cuándo:** **Sincronizar ahora** en **Integración…** o en la línea de sincronización del
 tablero, y sola cada 5, 15, 30 o 60 minutos (5 por defecto), o **Solo con el botón**. La
 sincronización solo corre con el panel abierto; la primera empieza al abrirlo.
@@ -406,8 +413,9 @@ Linux. Tres cosas a tener en cuenta:
 | Redmine: leer | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 por página), más `&assigned_to_id=me` con solo mías |
 | Redmine: copiar una petición | `backlog task create <título> -s <estado> --priority <p> -d <texto> --ref <URL de la petición>` |
 | Redmine: recibir un cambio | `backlog task edit <id> -t … -s … --priority … -d …` (solo los campos que cambiaron) |
+| Redmine: quién eres | `GET /users/current.json?include=groups`, para la vista y para asignar las peticiones nuevas |
 | Redmine: enviar un cambio (bidireccional) | `PUT /issues/<n>.json` con los campos que cambiaron |
-| Redmine: enviar una tarea nueva (bidireccional) | `POST /issues.json` (con solo mías, tras `GET /users/current.json`, asignada a ti), y luego `backlog task edit <id> --add-ref <URL de la petición>` |
+| Redmine: enviar una tarea nueva (bidireccional) | `POST /issues.json` (con solo mías, asignada a ti), y luego `backlog task edit <id> --add-ref <URL de la petición>` |
 
 Los comandos de edición se comprobaron con Backlog.md 1.55.3. Al reescribir la lista de
 criterios se conservan las marcas de los criterios cuyo texto no ha cambiado.
@@ -525,7 +533,7 @@ Cubren:
 - el color de cada estado y su casilla **Cerrado**, guardados por proyecto, y las tarjetas con el color de su estado;
 - cada control de edición, el campo de varias líneas y el editor externo;
 - los dos borradores;
-- la sincronización con Redmine: la fusión, solo lectura y bidireccional, solo mías, conflictos,
+- la sincronización con Redmine: la fusión, solo lectura y bidireccional, solo mías (al sincronizar y al ver), conflictos,
   correspondencias, escrituras rechazadas, el temporizador, una clave que falta o es
   incorrecta, un proyecto que no existe y un servidor inalcanzable;
 - los estados de CLI ausente, proyecto sin inicializar, vigilancia que falla y sin

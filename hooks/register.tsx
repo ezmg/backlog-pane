@@ -56,7 +56,7 @@ import {
   toRemoteItem,
   urls as redmineUrls,
 } from './redmine'
-import { EMPTY_SYNC, needsRead, plan, readSyncStore } from './sync'
+import { EMPTY_SYNC, needsRead, othersTasks, plan, readSyncStore } from './sync'
 import type { LocalItem } from './sync'
 import type { Language, Strings } from './i18n'
 
@@ -362,15 +362,16 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
     ownsRef: ref => issueIdOf(base, ref) !== undefined,
   })
 
-  // Only mine: a task sent to Redmine is assigned to the key's owner, or it
-  // would fall out of the list on the next sync.
-  let me: number | undefined
-  if (settings.onlyMine && planned.actions.some(action => action.kind === 'create-remote')) {
-    const answer = await redmineCall($, 'GET', redmineUrls.currentUser(base))
-    me = answer.ok ? readCurrentUser(answer.text) : undefined
-  }
+  // Who the key's owner is, for the "only mine" view; and, syncing only
+  // theirs, a task sent to Redmine is assigned to them, or it would fall
+  // out of the list on the next sync.
+  const userAnswer = await redmineCall($, 'GET', redmineUrls.currentUser(base))
+  const mine = userAnswer.ok ? readCurrentUser(userAnswer.text) : undefined
+  const me = mine?.[0]
 
-  const meta = Object.fromEntries(issues.map(issue => [String(issue.id), { statusId: issue.statusId, priorityId: issue.priorityId }]))
+  const meta = Object.fromEntries(
+    issues.map(issue => [String(issue.id), { statusId: issue.statusId, priorityId: issue.priorityId, assigneeId: issue.assigneeId }]),
+  )
   const maps = { status: statusMap, priority: priorityMap }
   const lists = { statuses: remoteStatuses, priorities: remotePriorities }
   const links = { ...planned.links }
@@ -423,7 +424,7 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
       const fields = { ...action.fields, description: detail?.description ?? '' }
       const body = issueBody(fields, maps, lists)
       const answer = await redmineCall($, 'POST', redmineUrls.create(base), {
-        issue: { project_id: project, ...body.issue, ...(me === undefined ? {} : { assigned_to_id: me }) },
+        issue: { project_id: project, ...body.issue, ...(settings.onlyMine && me !== undefined ? { assigned_to_id: me } : {}) },
       })
       const id = answer.ok ? readCreated(answer.text) : undefined
       if (id === undefined) {
@@ -445,6 +446,7 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
       meta,
       statuses: remoteStatuses,
       priorities: remotePriorities,
+      me: mine ?? data.me,
       lastSync: now,
       warnings,
     },
@@ -532,6 +534,7 @@ async function setTracker($: Engine, value: string) {
       project: '',
       mode: 'read',
       onlyMine: false,
+      view: 'all',
       intervalMin: 5,
       statusMap: {},
       priorityMap: {},
@@ -1687,7 +1690,13 @@ export const register: Register = (on, options) => {
       )
     }
 
-    const list = await read($, tasks)
+    const all = await read($, tasks)
+    // The "only mine" view: hides the tasks of issues assigned to others.
+    const me = synced.settings ? synced.data.me : undefined
+    const isMineView = synced.settings?.view === 'mine' && me !== undefined
+    const others = isMineView ? othersTasks(synced.data.links, synced.data.meta, me) : new Set<string>()
+    const list = all.filter(task => !others.has(task.id))
+    const hiddenCount = all.length - list.length
     const unfolded = await read($, openGroups)
     const groups = groupTasks(list, order, doneLimit, closed, kept.colors)
     const creating = await read($, isCreating)
@@ -1729,10 +1738,19 @@ export const register: Register = (on, options) => {
               label={synced.isSyncing ? t.syncing : t.syncNow}
               onPress={() => runSync($)}
             />
+            {me !== undefined ? (
+              <Button
+                key="sync-view"
+                plain
+                dimColor
+                label={isMineView ? t.viewMine(hiddenCount) : t.viewAll}
+                onPress={() => setSyncSettings($, { view: isMineView ? 'all' : 'mine' })}
+              />
+            ) : null}
           </Box>
         ) : null}
         {footer}
-        {list.length === 0 ? <Text dimColor>{t.noTasks}</Text> : null}
+        {list.length === 0 ? <Text dimColor>{hiddenCount > 0 ? t.allHidden : t.noTasks}</Text> : null}
         {hasBoard && Client ? (
           <Client key="board" module="./board.tsx" width="100%" props={board(groups, e.props.bodyColumns, t)} />
         ) : null}

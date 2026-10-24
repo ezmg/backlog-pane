@@ -176,6 +176,12 @@ changed on both sides, to different values, neither side is touched for that fie
 board shows *1 conflict*, and **Integration…** shows both values with **Use Redmine's** and
 **Use Backlog.md's**.
 
+**View: all / only mine.** Beside **Sync now** on the board, a button switches the view at
+once, with no call to Redmine: *only mine* hides the tasks whose issue, at the last sync,
+was assigned to someone else, to nobody, or was not listed; tasks with no issue always
+show. It is separate from the **Issues** option, which decides what is synced: you can
+sync every issue and still look at yours only. The view is kept per project.
+
 **When:** **Sync now** in **Integration…** or on the board's sync line, and on its own every
 5, 15, 30 or 60 minutes (5 by default), or **Only with the button**. The sync runs only
 while the pane is open; the first one starts when it opens.
@@ -383,8 +389,9 @@ things to know:
 | Redmine: read | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 a page), plus `&assigned_to_id=me` for only mine |
 | Redmine: copy an issue in | `backlog task create <title> -s <status> --priority <p> -d <text> --ref <issue URL>` |
 | Redmine: take a change | `backlog task edit <id> -t … -s … --priority … -d …` (only the fields that changed) |
+| Redmine: who you are | `GET /users/current.json?include=groups`, for the view and for assigning new issues |
 | Redmine: send a change (both ways) | `PUT /issues/<n>.json` with the fields that changed |
-| Redmine: send a new task (both ways) | `POST /issues.json` (with only mine, after `GET /users/current.json`, assigned to you), then `backlog task edit <id> --add-ref <issue URL>` |
+| Redmine: send a new task (both ways) | `POST /issues.json` (with only mine, assigned to you), then `backlog task edit <id> --add-ref <issue URL>` |
 
 The editing commands were checked against Backlog.md 1.55.3. Rewriting the criteria list
 keeps the ticks of the criteria whose text did not change.
@@ -498,7 +505,7 @@ cover:
 - each status's colour and its **Closed** box, kept per project, and cards taking their status's colour;
 - every editing control, the inline field and the external editor;
 - both drafts;
-- the Redmine sync: the merge, read only and both ways, only mine, conflicts, mappings, refused
+- the Redmine sync: the merge, read only and both ways, only mine (synced and viewed), conflicts, mappings, refused
   writes, the timer, a missing or wrong key, a missing project and an unreachable server;
 - the missing-CLI, uninitialized, failing-watch and headless states.
 

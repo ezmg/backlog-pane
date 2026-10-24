@@ -13,6 +13,7 @@ export type RedmineIssue = {
   description: string
   statusId: number
   priorityId: number | null
+  assigneeId: number | null
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -52,7 +53,7 @@ export const urls = {
   /** Every issue of the project, open and closed, not its subprojects', by id; or only the key owner's. */
   issues: (base: string, project: string, offset: number, onlyMine = false) =>
     `${base}/issues.json?project_id=${encodeURIComponent(project)}&subproject_id=!*&status_id=*${onlyMine ? '&assigned_to_id=me' : ''}&sort=id&limit=${PAGE}&offset=${offset}`,
-  currentUser: (base: string) => `${base}/users/current.json`,
+  currentUser: (base: string) => `${base}/users/current.json?include=groups`,
   project: (base: string, project: string) => `${base}/projects/${encodeURIComponent(project)}.json`,
   statuses: (base: string) => `${base}/issue_statuses.json`,
   priorities: (base: string) => `${base}/enumerations/issue_priorities.json`,
@@ -73,6 +74,7 @@ export function readIssues(text: string): { issues: RedmineIssue[]; total: numbe
   const issues = doc.issues.filter(isRecord).flatMap(raw => {
     const status = isRecord(raw.status) ? raw.status : {}
     const priority = isRecord(raw.priority) ? raw.priority : {}
+    const assignee = isRecord(raw.assigned_to) ? raw.assigned_to : {}
     if (typeof raw.id !== 'number' || typeof status.id !== 'number') return []
     return [
       {
@@ -81,6 +83,7 @@ export function readIssues(text: string): { issues: RedmineIssue[]; total: numbe
         description: typeof raw.description === 'string' ? raw.description : '',
         statusId: status.id,
         priorityId: typeof priority.id === 'number' ? priority.id : null,
+        assigneeId: typeof assignee.id === 'number' ? assignee.id : null,
       },
     ]
   })
@@ -111,10 +114,12 @@ export function readCreated(text: string): number | undefined {
   return isRecord(doc) && isRecord(doc.issue) && typeof doc.issue.id === 'number' ? doc.issue.id : undefined
 }
 
-/** The id of the key's owner, from `/users/current.json`. */
-export function readCurrentUser(text: string): number | undefined {
+/** The key's owner's id, then their groups' (an issue can be assigned to a group), from `/users/current.json`. */
+export function readCurrentUser(text: string): number[] | undefined {
   const doc = parse(text)
-  return isRecord(doc) && isRecord(doc.user) && typeof doc.user.id === 'number' ? doc.user.id : undefined
+  if (!isRecord(doc) || !isRecord(doc.user) || typeof doc.user.id !== 'number') return undefined
+  const groups = Array.isArray(doc.user.groups) ? doc.user.groups.filter(isRecord).map(group => group.id) : []
+  return [doc.user.id, ...groups.filter((id): id is number => typeof id === 'number')]
 }
 
 /** Redmine's own words for a refused write (422 `{ errors: [...] }`), or the status. */

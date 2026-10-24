@@ -6,6 +6,8 @@ export const REDMINE = 'https://redmine.test'
 export const KEY = 'secret-key'
 /** The id of the user who owns KEY. */
 export const ME = 7
+/** A group the user of KEY is in. */
+export const GROUP = 20
 
 export type FakeIssue = {
   id: number
@@ -45,7 +47,9 @@ export function fakeRedmine(options: { project?: string; issues?: FakeIssue[]; r
     const body = init.body ? (JSON.parse(init.body) as { issue: Record<string, unknown> }) : undefined
     if (path === `/projects/${project}.json`) return json(200, { project: { id: 1, identifier: project } })
     if (path.startsWith('/projects/')) return json(404, {})
-    if (path === '/users/current.json') return json(200, { user: { id: ME, login: 'me' } })
+    if (path.startsWith('/users/current.json')) {
+      return json(200, { user: { id: ME, login: 'me', ...(path.includes('include=groups') ? { groups: [{ id: GROUP, name: 'Devs' }] } : {}) } })
+    }
     if (path === '/issue_statuses.json') return json(200, { issue_statuses: STATUSES })
     if (path === '/enumerations/issue_priorities.json') return json(200, { issue_priorities: PRIORITIES })
     if (path.startsWith('/issues.json?') && method === 'GET') {
@@ -54,7 +58,7 @@ export function fakeRedmine(options: { project?: string; issues?: FakeIssue[]; r
       const offset = Number(query.get('offset') ?? 0)
       const limit = Number(query.get('limit') ?? 25)
       const mine = query.get('assigned_to_id') === 'me'
-      const all = [...issues.values()].filter(issue => !mine || issue.assignee === ME).sort((a, b) => a.id - b.id)
+      const all = [...issues.values()].filter(issue => !mine || issue.assignee === ME || issue.assignee === GROUP).sort((a, b) => a.id - b.id)
       return json(200, {
         issues: all.slice(offset, offset + limit).map(issue => ({
           id: issue.id,
@@ -62,6 +66,7 @@ export function fakeRedmine(options: { project?: string; issues?: FakeIssue[]; r
           description: issue.description,
           status: { id: issue.status, name: STATUSES.find(one => one.id === issue.status)?.name },
           priority: { id: issue.priority, name: PRIORITIES.find(one => one.id === issue.priority)?.name },
+          ...(issue.assignee === undefined ? {} : { assigned_to: { id: issue.assignee, name: `User ${issue.assignee}` } }),
         })),
         total_count: all.length,
         offset,

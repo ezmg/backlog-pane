@@ -16,7 +16,7 @@ import {
   toRemoteItem,
   urls,
 } from '../hooks/redmine'
-import { mergeField, needsRead, plan, readSyncStore } from '../hooks/sync'
+import { mergeField, needsRead, othersTasks, plan, readSyncStore } from '../hooks/sync'
 import type { Fields, LocalItem, RemoteItem } from '../hooks/sync'
 
 const fields = (over: Partial<Fields> = {}): Fields => ({
@@ -188,7 +188,8 @@ describe('Redmine', () => {
     expect(urls.issues('https://r.test', 'demo', 0, true)).toBe(
       'https://r.test/issues.json?project_id=demo&subproject_id=!*&status_id=*&assigned_to_id=me&sort=id&limit=100&offset=0',
     )
-    expect(readCurrentUser('{"user":{"id":7}}')).toBe(7)
+    expect(readCurrentUser('{"user":{"id":7}}')).toEqual([7])
+    expect(readCurrentUser('{"user":{"id":7,"groups":[{"id":20},{"name":"x"}]}}')).toEqual([7, 20])
     expect(readCurrentUser('{"user":{}}')).toBe(undefined)
   })
 
@@ -197,12 +198,19 @@ describe('Redmine', () => {
       JSON.stringify({
         issues: [
           { id: 1, subject: 'A', description: null, status: { id: 2 }, priority: { id: 3 } },
+          { id: 2, subject: 'B', status: { id: 1 }, assigned_to: { id: 7, name: 'Me' } },
           { id: 'bad', status: { id: 1 } },
         ],
         total_count: 9,
       }),
     )
-    expect(page).toEqual({ issues: [{ id: 1, subject: 'A', description: '', statusId: 2, priorityId: 3 }], total: 9 })
+    expect(page).toEqual({
+      issues: [
+        { id: 1, subject: 'A', description: '', statusId: 2, priorityId: 3, assigneeId: null },
+        { id: 2, subject: 'B', description: '', statusId: 1, priorityId: null, assigneeId: 7 },
+      ],
+      total: 9,
+    })
     expect(readIssues('<html>')).toBe(undefined)
     expect(readStatuses(JSON.stringify({ issue_statuses: [{ id: 5, name: 'Closed', is_closed: true }] }))).toEqual([
       { id: 5, name: 'Closed', isClosed: true },
@@ -259,12 +267,12 @@ describe('Redmine', () => {
   })
 
   test('a priority is lower case, as a task spells it, whatever the config prints', async () => {
-    const issue = { id: 3, subject: 'S', description: '', statusId: 1, priorityId: 3 }
+    const issue = { id: 3, subject: 'S', description: '', statusId: 1, priorityId: 3, assigneeId: null }
     expect(toRemoteItem('https://r.test', issue, { 1: 'To Do' }, { 3: 'High' }, 'To Do').fields.priority).toBe('high')
   })
 
   test('an issue in Backlog.md terms', async () => {
-    const issue = { id: 3, subject: 'S', description: 'D', statusId: 9, priorityId: 2 }
+    const issue = { id: 3, subject: 'S', description: 'D', statusId: 9, priorityId: 2, assigneeId: null }
     expect(toRemoteItem('https://r.test', issue, { 1: 'To Do' }, { 2: '' }, 'To Do')).toEqual({
       key: '3',
       url: 'https://r.test/issues/3',
@@ -283,5 +291,25 @@ describe('Redmine', () => {
       { statuses: redmineStatuses, priorities: [{ id: 3, name: 'High', isDefault: false }] },
     )
     expect(body).toEqual({ issue: { subject: 'T', priority_id: 3 }, skipped: ['status'] })
+  })
+})
+
+describe('the only mine view', () => {
+  test('hides the tasks of issues assigned to others, to nobody, or not listed; never local ones', async () => {
+    const base = fields()
+    const links = {
+      1: { taskId: 'BL-1', base },
+      2: { taskId: 'BL-2', base },
+      3: { taskId: 'BL-3', base },
+      4: { taskId: 'BL-4', base },
+      5: { taskId: 'BL-5', base },
+    }
+    const meta = {
+      1: { statusId: 1, priorityId: null, assigneeId: 7 },
+      2: { statusId: 1, priorityId: null, assigneeId: 20 },
+      3: { statusId: 1, priorityId: null, assigneeId: 3 },
+      4: { statusId: 1, priorityId: null, assigneeId: null },
+    }
+    expect([...othersTasks(links, meta, [7, 20])].sort()).toEqual(['BL-3', 'BL-4', 'BL-5'])
   })
 })

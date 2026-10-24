@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { KEY, ME, REDMINE, fakeRedmine } from './fake-redmine'
+import { GROUP, KEY, ME, REDMINE, fakeRedmine } from './fake-redmine'
 import type { FakeIssue } from './fake-redmine'
 import { CWD, PANE, open, world } from './fixtures'
 import type { FakeTask } from './fixtures'
@@ -168,6 +168,45 @@ test('only mine: just the issues assigned to the key’s owner; a new task is as
   await ui.press({ key: 'sync-now' })
   expect(requests.filter(one => one.method !== 'GET')).toHaveLength(1)
   expect(tasks).toHaveLength(4)
+  await ui.unmount()
+})
+
+test('the board’s view: only mine hides the tasks of others’ issues at once, and is kept', WITH_KEY, async ($, on) => {
+  const redmine = fakeRedmine({
+    issues: [
+      { id: 1, subject: 'Mine', description: '', status: 1, priority: 2, assignee: ME },
+      { id: 2, subject: 'My group’s', description: '', status: 1, priority: 2, assignee: GROUP },
+      { id: 3, subject: 'Someone else’s', description: '', status: 1, priority: 2, assignee: 3 },
+    ],
+  })
+  const before: FakeTask[] = [{ id: 'BL-1', title: 'Local idea', status: 'To Do', references: [] }]
+  const { clock, tasks, requests, store } = world(on, { isStateful: true, tasks: before, http: redmine.http, store: settings() })
+  await open($, clock)
+  expect(tasks).toHaveLength(4)
+  // The fake watch shows the tasks the sync made when it starts again.
+  await clock.advance(2_000)
+  const ui = await $.ui.mount({ ...PANE, surface: 'vscode' })
+  const titles = async () => {
+    const seen: string[] = []
+    for (const task of tasks) if (await ui.find({ key: `task:${task.id}` })) seen.push(task.title)
+    return seen.sort()
+  }
+  expect(await titles()).toHaveLength(4)
+  const syncs = requests.length
+  await ui.press({ key: 'sync-view' })
+  // At once, with no call to Redmine; local tasks are nobody else’s, so they stay.
+  expect(requests).toHaveLength(syncs)
+  expect(await titles()).toEqual(['Local idea', 'Mine', 'My group’s'])
+  expect((await ui.find({ key: 'sync-view' }))?.props.label).toBe('View: only mine (1 hidden)')
+  expect((store.get(SYNC_KEY) as { settings: { view: string } }).settings.view).toBe('mine')
+  // Reassigned in Redmine: it shows after the next sync.
+  redmine.issues.get(3)!.assignee = ME
+  await ui.press({ key: 'sync-now-board' })
+  await clock.advance(2_000)
+  expect(await titles()).toHaveLength(4)
+  expect((await ui.find({ key: 'sync-view' }))?.props.label).toBe('View: only mine')
+  await ui.press({ key: 'sync-view' })
+  expect((await ui.find({ key: 'sync-view' }))?.props.label).toBe('View: all')
   await ui.unmount()
 })
 

@@ -184,6 +184,7 @@ export function readSyncStore(value: unknown): { settings: RedmineSettings | nul
           project: typeof s.project === 'string' ? s.project : '',
           mode: s.mode === 'both' ? 'both' : 'read',
           onlyMine: s.onlyMine === true,
+          view: s.view === 'mine' ? 'mine' : 'all',
           intervalMin: typeof s.intervalMin === 'number' && s.intervalMin >= 0 ? s.intervalMin : 5,
           statusMap: strings(s.statusMap) as Record<string, string>,
           priorityMap: strings(s.priorityMap) as Record<string, string>,
@@ -198,11 +199,27 @@ export function readSyncStore(value: unknown): { settings: RedmineSettings | nul
       meta: isRecord(data.meta) ? (data.meta as SyncData['meta']) : {},
       statuses: Array.isArray(data.statuses) ? (data.statuses as SyncData['statuses']) : [],
       priorities: Array.isArray(data.priorities) ? (data.priorities as SyncData['priorities']) : [],
+      me: Array.isArray(data.me) ? data.me.filter(one => typeof one === 'number') : undefined,
       lastSync: typeof data.lastSync === 'string' ? data.lastSync : undefined,
       lastError: typeof data.lastError === 'string' ? data.lastError : undefined,
       warnings: Array.isArray(data.warnings) ? data.warnings.filter(one => typeof one === 'string') : [],
     },
   }
+}
+
+/**
+ * The tasks the "only mine" view hides: those linked to an issue that, at
+ * the last sync, was assigned to someone else, to nobody, or was not listed.
+ * Tasks with no issue are nobody else's, so they show.
+ */
+export function othersTasks(links: Readonly<Record<string, Link>>, meta: SyncData['meta'], me: readonly number[]): Set<string> {
+  const hidden = new Set<string>()
+  for (const [key, link] of Object.entries(links)) {
+    const assignee = meta[key]?.assigneeId
+    if (!link.taskId || (typeof assignee === 'number' && me.includes(assignee))) continue
+    hidden.add(link.taskId)
+  }
+  return hidden
 }
 
 export const EMPTY_SYNC: SyncData = { links: {}, conflicts: [], meta: {}, statuses: [], priorities: [], warnings: [] }
