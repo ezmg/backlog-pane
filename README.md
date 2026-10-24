@@ -74,8 +74,9 @@ controls and Esc returns to the prompt.
 | Where | Key or action | What it does |
 | --- | --- | --- |
 | Board (terminal, desktop) | Drag a card to another column | Moves the task there. |
-| Board | Click a card, then another column | Moves the selected card there. |
+| Board (terminal, desktop) | Click a card, then a free spot in another column | Moves the selected card there. |
 | Board | Click the selected card again | Opens the task. |
+| Board | Click a free spot | Lets go of the selected card. A card you moved with the mouse is let go of by itself, so a later click can't move it again. |
 | Board, after a click on it | `←` / `→` | Moves the selected card to the next open column left or right, skipping closed ones. |
 | Board, after a click on it | `↑` / `↓` | Selects the card above or below. The first key selects the first card of the first open column. |
 | Board, after a click on it | `Enter` | Opens the selected task. |

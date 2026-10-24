@@ -79,8 +79,9 @@ control a otro y Esc vuelve al prompt.
 | Dónde | Tecla o acción | Qué hace |
 | --- | --- | --- |
 | Tablero (terminal, escritorio) | Arrastrar una tarjeta a otra columna | Mueve la tarea allí. |
-| Tablero | Clic en una tarjeta y luego en otra columna | Mueve allí la tarjeta seleccionada. |
+| Tablero (terminal, escritorio) | Clic en una tarjeta y luego en un hueco libre de otra columna | Mueve allí la tarjeta seleccionada. |
 | Tablero | Otro clic en la tarjeta seleccionada | Abre la tarea. |
+| Tablero | Clic en un hueco libre | Suelta la tarjeta seleccionada. Una tarjeta que has movido con el ratón se suelta sola, así que un clic posterior no puede volver a moverla. |
 | Tablero, tras hacer clic en él | `←` / `→` | Mueve la tarjeta seleccionada a la siguiente columna abierta a la izquierda o a la derecha, saltándose las cerradas. |
 | Tablero, tras hacer clic en él | `↑` / `↓` | Selecciona la tarjeta de arriba o de abajo. La primera tecla selecciona la primera tarjeta de la primera columna abierta. |
 | Tablero, tras hacer clic en él | `Enter` | Abre la tarea seleccionada. |

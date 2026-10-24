@@ -9,18 +9,27 @@
 // that colour, so a card moved to another column takes that column's
 // colour: its border, its title (one line, or two when it does not fit),
 // its id and criteria, its border. A dashed slot under the cards of the
-// column a card is dragged over marks where it will land. Clicking a card selects it; dragging it to another column,
-// or clicking another column while it is selected, moves it; clicking it
-// again opens it. With the focus here, ←/→ move the selected card to the
-// nearest open column (closed ones are skipped), ↑/↓ pick another, Enter
-// opens it.
+// column a card is dragged over marks where it will land.
+//
+// Clicking a card selects it; clicking it again opens it, and clicking
+// another column then moves it there. Dragging a card to another column
+// moves it. A card moved by the pointer is let go of, so a later click
+// cannot move it again; a click on an empty spot lets go of it too. With
+// the focus here, ←/→ move the selected card to the nearest open column
+// (closed ones are skipped), ↑/↓ pick another, Enter opens it.
 
 import type { ClientModule } from 'claude-code'
 
 import type { BoardCard, BoardMessage, BoardProps } from '../types'
 
 type Drag = { id: string; from: number; over: number; wasSelected: boolean }
-type State = { selected?: string; drag?: Drag }
+/**
+ * `isArmed`: the selected card was picked by a click and has not moved since,
+ * so a click on another column moves it there. A drag that moved a card, a
+ * move by click, or a click on an empty spot leaves nothing selected; a card
+ * picked with the keys is never armed (←/→ move it).
+ */
+type State = { selected?: string; isArmed?: boolean; drag?: Drag }
 
 const MIN_WIDTH = 12
 const GAP = 2
@@ -151,11 +160,14 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
       if (!at) return
       if (at.card) {
         const id = at.card.id
-        surface.setState({ selected: id, drag: { id, from: at.column, over: at.column, wasSelected: now.selected === id } })
+        const wasSelected = now.selected === id && now.isArmed === true
+        surface.setState({ selected: id, drag: { id, from: at.column, over: at.column, wasSelected } })
         return
       }
       const from = locate(props, now.selected)
-      if (now.selected && from && from.column !== at.column) move(now.selected, at.column)
+      if (now.selected && now.isArmed && from && from.column !== at.column) move(now.selected, at.column)
+      // Moved or not, a click on an empty spot lets go of the card.
+      surface.setState({})
       return
     }
     const drag = now.drag
@@ -167,9 +179,16 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
       return
     }
     if (event.type === 'up') {
-      surface.setState({ selected: now.selected })
-      if (drag.over !== drag.from) move(drag.id, drag.over)
-      else if (drag.wasSelected) post({ type: 'open', id: drag.id })
+      if (drag.over !== drag.from) {
+        // Moved: let go of it, so the next click cannot move it again.
+        surface.setState({})
+        move(drag.id, drag.over)
+      } else if (drag.wasSelected) {
+        surface.setState({})
+        post({ type: 'open', id: drag.id })
+      } else {
+        surface.setState({ selected: drag.id, isArmed: true })
+      }
     }
   })
 
@@ -180,13 +199,13 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
       // The first card of the first open column that has one, else of any.
       const first = (props.columns.find(one => !one.isClosed && one.cards.length > 0) ??
         props.columns.find(one => one.cards.length > 0))?.cards[0]
-      if (first && ['up', 'down', 'left', 'right'].includes(event.key)) surface.setState({ selected: first.id })
+      if (first && ['up', 'down', 'left', 'right'].includes(event.key)) surface.setState({ selected: first.id, isArmed: false })
       return
     }
     const cards = props.columns[at.column]?.cards ?? []
     if (event.key === 'up' || event.key === 'down') {
       const next = cards[at.row + (event.key === 'up' ? -1 : 1)]
-      if (next) surface.setState({ selected: next.id })
+      if (next) surface.setState({ selected: next.id, isArmed: false })
     } else if (event.key === 'left') {
       move(now.selected, nextOpenColumn(props, at.column, -1))
     } else if (event.key === 'right') {
