@@ -60,6 +60,10 @@ del prompt. El prompt **nunca se envía por ti**.
 
   Los dos borradores sustituyen un cuadro del prompt vacío. Si el cuadro ya tiene texto,
   el borrador se añade debajo. No se envía nada.
+- **Sincronización con Redmine.** **Integración…** enlaza el proyecto con un proyecto de
+  Redmine, en solo lectura o bidireccional. Las peticiones se convierten en tareas y se
+  mantienen al día campo a campo, con un botón y cada pocos minutos. Ver
+  [Integración (Redmine)](#integración-redmine).
 - **Inglés y español.** El panel, el comando y los dos borradores. Ver la opción
   `language`.
 - **Solo la CLI, con una excepción.** Cada cambio en una tarea ejecuta un comando `backlog`
@@ -135,6 +139,70 @@ Backlog.md no tiene sitio para ellos. Son solo tuyos: no van en el repositorio, 
 equipo no los comparte, y un proyecto movido a otra carpeta empieza de cero. La opción
 `closedStatuses` (más abajo) solo es el valor inicial de un proyecto en el que nunca se ha
 marcado ninguna casilla **Cerrado**.
+
+## Integración (Redmine)
+
+Cada proyecto puede enlazarse con **un** gestor de tareas externo. Redmine es el primero;
+Jira y Excel vienen después. Las tareas se copian en Backlog.md con la CLI `backlog`, así
+que el tablero, Claude y las propias herramientas de Backlog.md las ven como tareas
+normales.
+
+**Configurarlo:**
+
+1. Consigue tu clave de API en Redmine (**Mi cuenta → Clave de acceso de la API**; el
+   servidor debe tener activado *Activar el servicio web REST*).
+2. Ponla en la opción **Redmine API key** del plugin (`/plugin`, o `/config` cuando el mod
+   se carga desde una carpeta). Es una opción sensible, así que Claude Code la guarda en el
+   almacenamiento seguro, no en `settings.json`.
+3. En el panel, pulsa **Integración…**, elige **Redmine** como gestor y escribe la URL del
+   servidor (`https://redmine.example.com`) y el identificador del proyecto (el de su URL,
+   por ejemplo `mi-app`).
+4. Elige el **Modo** y cada cuánto **Sincronizar**, y pulsa **Sincronizar ahora**.
+
+**Modos:**
+
+- **Solo lectura (Redmine → Backlog.md)**, el predeterminado: nunca se escribe nada en
+  Redmine. Un campo cambiado en Redmine sobrescribe el de la tarea. Un cambio hecho solo en
+  Backlog.md se queda ahí, hasta que Redmine cambie ese campo.
+- **Bidireccional:** un campo cambiado en un lado se copia al otro. Las tareas nuevas de
+  Backlog.md también se crean en Redmine, y reciben la URL de la nueva petición en sus
+  referencias.
+
+**Qué se sincroniza:** todas las peticiones del proyecto, abiertas y cerradas, sin las de
+sus subproyectos. De cada una, el título (asunto), el estado, la prioridad y la
+descripción. Cada tarea nueva lleva la URL de la petición (`…/issues/42`) en sus
+referencias, y así el panel vuelve a encontrar la pareja; una tarea que ya apuntaba así a
+una petición se adopta en vez de copiarse dos veces, y ganan los valores de Redmine.
+
+**Correspondencia de estados y prioridades.** Tras la primera sincronización,
+**Integración…** lista cada estado y prioridad de Redmine con el de Backlog.md al que va.
+El panel los deduce (primero el mismo nombre; luego los cerrados van al estado final, los
+del tipo *En curso* al tuyo y el resto al primer estado; *Urgente*/*Alta* → High,
+*Normal* → Medium, *Baja* → Low) y puedes cambiar cualquiera. Una prioridad puesta en
+**— (sin tocar)** no se sincroniza. En modo bidireccional, un estado de Backlog.md al que no
+corresponde ninguno de Redmine no se envía, y el panel lo avisa.
+
+**Conflictos.** El panel guarda lo que ambos lados tenían en la última sincronización. Si
+el mismo campo cambió en los dos lados, con valores distintos, no se toca ese campo en
+ninguno: el tablero muestra *1 conflicto*, e **Integración…** enseña los dos valores con
+**Usar el de Redmine** y **Usar el de Backlog.md**.
+
+**Cuándo:** **Sincronizar ahora** en **Integración…** o en la línea de sincronización del
+tablero, y sola cada 5, 15, 30 o 60 minutos (5 por defecto), o **Solo con el botón**. La
+sincronización solo corre con el panel abierto; la primera empieza al abrirlo.
+
+**No se borra nada** en ningún lado. Una petición borrada o movida fuera del proyecto deja
+su tarea como estaba. **Desconectar** (gestor **Ninguno**) para la sincronización y
+conserva las tareas.
+
+**Tareas de antes.** En modo bidireccional, las tareas que ya estaban en el proyecto al
+configurar Redmine no se le envían, para no llenar Redmine al enlazar un proyecto.
+**Enviarlas también** las envía.
+
+Los ajustes, los enlaces y las correspondencias se guardan **por proyecto** en el almacén
+de Claude Code para el mod, como los colores, así que son solo tuyos. La clave es por
+usuario: una para todos los proyectos que sincronices, enviada solo en la cabecera
+`X-Redmine-API-Key` a la URL que fija cada proyecto.
 
 ## Editar textos largos
 
@@ -258,6 +326,7 @@ cerrarlo se detiene el proceso `--watch`.
 | `backlogPath` | *(vacío)* | Ruta completa al ejecutable `backlog`. Si está vacía, el mod prueba `backlog` en el PATH. En Windows, después prueba los binarios nativos que npm y bun instalan de forma global. |
 | `doneLimit` | `5` | Cuántas de las tareas más recientes del estado final (y de cada estado cerrado) muestra el tablero, y la lista cuando ese grupo está desplegado. |
 | `closedStatuses` | *(vacío)* | Opcional. Estados que empiezan como cerrados en un proyecto en el que nunca has marcado una casilla **Cerrado** en **Estados…**, separados por comas (por ejemplo `Cancelled`). En cuanto marcas o desmarcas una, el proyecto guarda su propia lista. |
+| `redmineApiKey` | *(vacío)* | Tu clave de API de Redmine, para los proyectos que enlaces con Redmine en **Integración…**. Sensible: se guarda en el almacenamiento seguro y solo se envía a la URL de Redmine que fija cada proyecto. |
 | `language` | `auto` | `en` (inglés), `es` (español) o `auto`. Con `auto`, el mod usa lo primero de esta lista que esté definido: el ajuste `language` de Claude Code (texto libre como `Español`, `Spanish` o `English`), luego `LC_ALL`, `LC_MESSAGES`, `LANG` y por último el idioma del sistema. Si no hay ninguno, usa inglés. Cualquier idioma que no sea español se muestra en inglés. |
 
 Se cambian en los ajustes del plugin, en `/plugin`. En una sesión que carga el mod desde una
@@ -330,6 +399,11 @@ Linux. Tres cosas a tener en cuenta:
 | Editar un criterio | `backlog task edit <id> --acceptance-criteria <1.º> --acceptance-criteria <2.º> …` (la lista entera, en orden), y después `--check-ac <n>` si estaba marcado |
 | Descripción / plan | `backlog task edit <id> -d <texto>` / `--plan <texto>` |
 | Editor | `backlog config get defaultEditor`, y luego el editor con un archivo temporal |
+| Redmine: leer | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 por página) |
+| Redmine: copiar una petición | `backlog task create <título> -s <estado> --priority <p> -d <texto> --ref <URL de la petición>` |
+| Redmine: recibir un cambio | `backlog task edit <id> -t … -s … --priority … -d …` (solo los campos que cambiaron) |
+| Redmine: enviar un cambio (bidireccional) | `PUT /issues/<n>.json` con los campos que cambiaron |
+| Redmine: enviar una tarea nueva (bidireccional) | `POST /issues.json`, y luego `backlog task edit <id> --add-ref <URL de la petición>` |
 
 Los comandos de edición se comprobaron con Backlog.md 1.55.3. Al reescribir la lista de
 criterios se conservan las marcas de los criterios cuyo texto no ha cambiado.
@@ -360,6 +434,12 @@ Tras 5 fallos seguidos, el panel muestra el error y un botón **Reintentar**.
   borradores ni tareas archivadas, así que se puede eliminar un estado que use una tarea
   archivada. El panel no reordena ni renombra estados existentes: para eso, edita la
   configuración.
+- **Redmine:** no se sincronizan los criterios de aceptación, el plan, las notas, los
+  comentarios, los responsables, los tipos, las versiones ni los campos personalizados. Las
+  descripciones pasan tal cual, sin convertir entre el Textile (o Markdown) de Redmine y el
+  Markdown de Backlog.md. Un flujo de trabajo de Redmine puede rechazar un cambio de
+  estado; el panel muestra el motivo de Redmine y lo reintenta en la siguiente
+  sincronización. Solo sincroniza con el panel abierto. Jira y Excel aún no están.
 - **Todavía no:** aprobación del plan, sincronización automática cuando Claude termina,
   hitos y la definición de terminado. No se muestran subtareas, dependencias, etiquetas ni
   responsables.
@@ -385,9 +465,12 @@ Tras 5 fallos seguidos, el panel muestra el error y un botón **Reintentar**.
 hooks/register.tsx                comando, panel, bucle de vigilancia y acciones
 hooks/board.tsx                   el módulo de superficie Client del tablero (terminal, escritorio)
 hooks/cli.ts                      funciones puras: comandos, lector del flujo JSON, agrupación, colores, editor
+hooks/sync.ts                     núcleo puro de la sincronización: fusión a tres bandas por campo, el plan de cada sincronización
+hooks/redmine.ts                  adaptador puro de Redmine: URLs, lectura, correspondencias por defecto, cuerpos de las peticiones
 hooks/i18n.ts                     textos en inglés y español, detección del idioma
 types/index.d.ts                  el contrato de $.state, las props del tablero, las formas de Backlog.md
-tests/                            suites de claude plugin test (fixtures.ts es el mundo simulado, con una configuración falsa)
+tests/                            suites de claude plugin test (fixtures.ts es el mundo simulado, con una configuración falsa;
+                                  fake-redmine.ts un Redmine en memoria)
 ```
 
 Ejecuta el mod desde una copia de trabajo para una sesión:
@@ -438,6 +521,9 @@ Cubren:
 - el color de cada estado y su casilla **Cerrado**, guardados por proyecto, y las tarjetas con el color de su estado;
 - cada control de edición, el campo de varias líneas y el editor externo;
 - los dos borradores;
+- la sincronización con Redmine: la fusión, solo lectura y bidireccional, conflictos,
+  correspondencias, escrituras rechazadas, el temporizador, una clave que falta o es
+  incorrecta, un proyecto que no existe y un servidor inalcanzable;
 - los estados de CLI ausente, proyecto sin inicializar, vigilancia que falla y sin
   interfaz.
 
