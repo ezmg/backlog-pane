@@ -70,6 +70,8 @@ export type World = {
   // they advance it, so it stands for a watch that keeps running. (A fake
   // child left suspended mid-stream keeps the kit's acts from settling.)
   watch?: { stdout?: string[]; stderr?: string; code?: number }
+  // What every `--watch` child after the first does, when it differs.
+  laterWatch?: { stdout?: string[]; stderr?: string; code?: number }
   list?: ProcessRunResult
   create?: ProcessRunResult
   // What every `backlog task edit` answers.
@@ -87,6 +89,14 @@ export type World = {
   isConfigElsewhere?: boolean
   // What $.store holds at the start (the mod's per-project prefs).
   store?: Record<string, unknown>
+  // `task create` and `task edit` change what `task list` and `task view`
+  // answer, as the real CLI's do (off by default: most tests read a fixed board).
+  isStateful?: boolean
+  // What answers $.http.fetch: a fake tracker.
+  http?: (url: string, init: { method?: string; headers?: Record<string, string>; body?: string }) => {
+    status: number
+    text: string
+  }
   env?: Record<string, string>
   // Claude Code's settings, as `$.settings.read` answers them.
   settings?: Record<string, unknown>
@@ -157,7 +167,8 @@ export function world(on: On, options: World = {}) {
   const runs: string[][] = []
   const editorRuns: { argv: readonly string[]; timeoutMs?: number }[] = []
   const fills: { text: string; mode?: string }[] = []
-  const tasks = options.tasks ?? TASKS
+  // A copy, so a stateful test changes its own tasks only.
+  const tasks: FakeTask[] = (options.tasks ?? TASKS).map(task => ({ ...task }))
   const files = new Files()
   const configPath = options.configPath ?? 'backlog/config.yml'
   files.set(configPath, configWith(options.statuses ?? ['To Do', 'In Progress', 'Done']))
@@ -186,6 +197,23 @@ export function world(on: On, options: World = {}) {
     return { value: undefined }
   })
   on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
+  const requests: { method: string; url: string; body?: unknown; key?: string }[] = []
+  if (options.http) {
+    const http = options.http
+    on('http.fetch', (_, e) => {
+      const init = e.init ?? {}
+      requests.push({
+        method: init.method ?? 'GET',
+        url: e.url,
+        body: init.body ? JSON.parse(init.body) : undefined,
+        key: init.headers?.['X-Redmine-API-Key'],
+      })
+      const answer = http(e.url, init)
+      return {
+        value: { status: answer.status, ok: answer.status >= 200 && answer.status < 300, headers: {}, text: answer.text },
+      }
+    })
+  }
   const store = new Map<string, unknown>(Object.entries(options.store ?? {}))
   on('store.get', (_, e) => ({ value: store.get(e.key) }))
   on('store.set', (_, e) => {
@@ -230,16 +258,23 @@ export function world(on: On, options: World = {}) {
     }
     if (argv[0] === 'task' && argv[1] === 'view') {
       const summary = tasks.find(one => one.id === argv[2])
-      const view = summary?.id === VIEW.task.id ? VIEW : { ...VIEW, task: { ...VIEW.task, priority: null, ...summary } }
+      const view = options.isStateful
+        ? { ...VIEW, task: { acceptanceCriteria: [], description: null, implementationPlan: null, priority: null, ...summary } }
+        : summary?.id === VIEW.task.id
+          ? VIEW
+          : { ...VIEW, task: { ...VIEW.task, priority: null, ...summary } }
       return { value: ok(JSON.stringify(view, null, 2)) }
     }
     if (argv[0] === 'task' && argv[1] === 'edit' && options.edit) return { value: options.edit }
+    if (options.isStateful && argv[0] === 'task' && (argv[1] === 'create' || argv[1] === 'edit')) {
+      return { value: applyTaskCommand(tasks, argv) }
+    }
     if (argv[0] === 'task' && argv[1] === 'create') return { value: options.create ?? ok('Created task BL-4\nFile: x.md') }
     return { value: ok('Updated task') }
   })
   on('process.spawn', async function* () {
     spawns += 1
-    const watch = options.watch ?? {
+    const watch = (spawns > 1 ? options.laterWatch : undefined) ?? options.watch ?? {
       stdout: [JSON.stringify({ schemaVersion: 1, kind: 'task-list', tasks }, null, 2)],
     }
     for (const text of watch.stdout ?? []) {
@@ -253,7 +288,38 @@ export function world(on: On, options: World = {}) {
   })
   /** The `task edit` commands run so far. */
   const edits = () => runs.filter(argv => argv[0] === 'task' && argv[1] === 'edit')
-  return { runs, edits, editorRuns, fills, files, configPath, store, clock, spawnCount: () => spawns }
+  return { runs, edits, editorRuns, fills, files, configPath, store, requests, tasks, clock, spawnCount: () => spawns }
+}
+
+/**
+ * `task create <title> …` and `task edit <id> …` on a stateful board: the
+ * flags the pane and its sync use (-t, -s, --priority, -d, --ref, --add-ref).
+ */
+function applyTaskCommand(tasks: FakeTask[], argv: string[]): ProcessRunResult {
+  const isCreate = argv[1] === 'create'
+  let task: FakeTask | undefined
+  let i = 3
+  if (isCreate) {
+    const next = 1 + Math.max(0, ...tasks.map(one => Number(/\d+$/.exec(one.id)?.[0] ?? 0)))
+    task = { id: `BL-${next}`, title: argv[2] ?? '', status: 'To Do', references: [] }
+    tasks.push(task)
+  } else {
+    task = tasks.find(one => one.id === argv[2])
+    if (!task) return fail(`Task ${argv[2]} not found`)
+  }
+  for (; i < argv.length; i += 2) {
+    const flag = argv[i]
+    const value = argv[i + 1] ?? ''
+    if (flag === '-t') task.title = value
+    else if (flag === '-s') task.status = value
+    else if (flag === '--priority') task.priority = value.toLowerCase()
+    else if (flag === '-d') task.description = value
+    else if (flag === '--ref') task.references = [value]
+    else if (flag === '--add-ref') task.references = [...((task.references as string[] | undefined) ?? []), value]
+  }
+  // The real CLI stamps the change, to the minute.
+  task.updatedAt = '2030-01-01T00:00:00Z'
+  return ok(isCreate ? `Created task ${task.id}\nFile: x.md` : `Updated task ${task.id}`)
 }
 
 export async function open($: Engine, clock: { settle: () => Promise<void> }) {
