@@ -89,14 +89,33 @@ export type World = {
   editor?: { writes?: string; result?: ProcessRunResult; throws?: string }
 }
 
+/**
+ * The fake file system: one file per path, however the path reaches a hook
+ * (on Windows the engine may hand `/tmp/x` on as `\\tmp\\x` or `C:\\tmp\\x`).
+ */
+class Files {
+  private readonly texts = new Map<string, string>()
+  private static key(path: string) {
+    return path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '').toLowerCase()
+  }
+  get(path: string) {
+    return this.texts.get(Files.key(path))
+  }
+  set(path: string, text: string) {
+    this.texts.set(Files.key(path), text)
+  }
+}
+
 export function world(on: On, options: World = {}) {
   const runs: string[][] = []
   const editorRuns: { argv: readonly string[]; timeoutMs?: number }[] = []
   const fills: { text: string; mode?: string }[] = []
-  const files = new Map<string, string>()
+  const files = new Files()
   let spawns = 0
   const clock = mock.clock(on)
-  mock.env(on, { OS: 'Linux', ...options.env })
+  // English unless a test says otherwise: LANG is read before the runtime's
+  // own locale, which is the machine's (Spanish on a Spanish Windows).
+  mock.env(on, { OS: 'Linux', LANG: 'en_US.UTF-8', ...options.env })
   on('settings.read', () => ({ value: options.settings ?? {} }))
   on('session.version', () => {
     const version = options.version ?? '2.1.310'
