@@ -66,7 +66,10 @@ async function text($: Engine): Promise<Strings> {
   if (!language) {
     let setting: unknown
     try {
-      setting = await $.settings.read({ key: 'language' })
+      const value = await $.settings.read({ key: 'language' })
+      // Earlier releases (2.1.296 among them) answer a read of one key with
+      // the whole settings object.
+      setting = isRecord(value) ? value.language : value
     } catch {
       // No settings to read here; the locale decides.
     }
