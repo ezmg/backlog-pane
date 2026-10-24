@@ -1,0 +1,6 @@
+{
+  "name": "backlog-pane",
+  "description": "backlog-pane: an unofficial Claude Code mod with a live Backlog.md board in a side pane.",
+  "owner": { "name": "Velkyss" },
+  "plugins": [{ "name": "backlog-pane", "source": "./" }]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "backlog-pane",
+  "version": "0.1.0",
+  "description": "A live Backlog.md board in a Claude Code side pane (unofficial).",
+  "author": { "name": "Velkyss" },
+  "homepage": "https://github.com/ezmg/backlog-pane",
+  "repository": "https://github.com/ezmg/backlog-pane",
+  "license": "MIT",
+  "keywords": ["backlog.md", "tasks", "kanban", "mod", "pane"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "backlogPath": {
+      "type": "string",
+      "title": "Backlog executable",
+      "description": "Full path to the backlog executable. Leave empty to find it on PATH (and, on Windows, in npm's and bun's global folders).",
+      "default": ""
+    },
+    "doneLimit": {
+      "type": "number",
+      "title": "Done tasks shown",
+      "description": "How many of the most recent tasks in the final status to list when that group is expanded.",
+      "default": 5
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Written by Claude Code when it loads the mod
+.claude-plugin/types/
+.mcpb-cache/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*~
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
