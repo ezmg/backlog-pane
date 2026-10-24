@@ -12,8 +12,8 @@ import {
   readTaskList,
   readTaskView,
   summarize,
-  workPrompt,
 } from '../hooks/cli'
+import { strings } from '../hooks/i18n'
 import type { TaskSummary } from '../types'
 
 const task = (id: string, status: string, updatedAt: string | null = null): TaskSummary => ({
@@ -92,12 +92,6 @@ describe('commands', () => {
     expect(args.watch()).toEqual(['task', 'list', '--json', '--watch'])
   })
 
-  test('the draft names the task id as given', async () => {
-    expect(workPrompt('BL-7')).toBe(
-      'Work on BL-7 only. Research the codebase and write an implementation plan in the task. Wait for my approval before coding.',
-    )
-  })
-
   test('candidates: the configured path alone, else PATH then the Windows globals', async () => {
     expect(candidates({ configured: ' /opt/backlog ' })).toEqual(['/opt/backlog'])
     expect(candidates({ os: 'Darwin' })).toEqual(['backlog'])
@@ -127,8 +121,11 @@ describe('grouping', () => {
   })
 
   test('summarizes the board as text', async () => {
-    const text = summarize([task('A-1', 'To Do'), task('A-2', 'Done')], ['To Do', 'Done'])
+    const text = summarize([task('A-1', 'To Do'), task('A-2', 'Done')], ['To Do', 'Done'], strings('en'))
+    expect(text).toContain('Backlog: 2 tasks')
     expect(text).toContain('To Do (1)')
     expect(text).toContain('A-2  Title of A-2')
+    expect(summarize([task('A-1', 'To Do')], ['To Do'], strings('es'))).toContain('Backlog: 1 tarea')
+    expect(summarize([], ['To Do'], strings('es'))).toContain('todavía no hay tareas')
   })
 })

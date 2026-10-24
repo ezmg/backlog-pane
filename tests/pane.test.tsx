@@ -69,6 +69,9 @@ type World = {
   // child left suspended mid-stream keeps the kit's acts from settling.)
   watch?: { stdout?: string[]; stderr?: string; code?: number }
   list?: ProcessRunResult
+  env?: Record<string, string>
+  // Claude Code's settings, as `$.settings.read` answers them.
+  settings?: Record<string, unknown>
 }
 
 function world(on: On, options: World = {}) {
@@ -76,7 +79,8 @@ function world(on: On, options: World = {}) {
   const fills: { text: string; mode?: string }[] = []
   let spawns = 0
   const clock = mock.clock(on)
-  mock.env(on, { OS: 'Linux' })
+  mock.env(on, { OS: 'Linux', ...options.env })
+  on('settings.read', () => ({ value: options.settings ?? {} }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.surfaces', () => ({ value: options.surfaces ?? ['desktop'] }))
@@ -205,6 +209,44 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.unmount()
   })
 }
+
+test('Spanish: the pane, the command and the draft', { options: { language: 'es' } }, async ($, on) => {
+  const { clock, fills } = world(on)
+  expect((await open($, clock)).text).toBe('Panel de Backlog abierto.')
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  expect(await ui.find({ type: 'Text', text: /^To Do/ })).toBeDefined()
+  await ui.press({ key: 'task:BL-1' })
+  expect(await ui.find({ type: 'Text', text: 'Descripción' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Criterios de aceptación' })).toBeDefined()
+  await ui.press({ key: 'work' })
+  expect(fills[0]?.text).toBe(
+    'Trabaja solo en BL-1. Investiga el código y escribe un plan de implementación en la tarea. Espera mi aprobación antes de programar.',
+  )
+  expect(await ui.find({ type: 'Text', text: /El borrador para BL-1/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('auto: Claude Code\'s language setting picks Spanish', async ($, on) => {
+  const { clock } = world(on, { settings: { language: 'Español' }, env: { LANG: 'en_US.UTF-8' } })
+  expect((await open($, clock)).text).toBe('Panel de Backlog abierto.')
+})
+
+test('auto: with no setting, LANG picks Spanish', async ($, on) => {
+  const { clock } = world(on, { env: { LANG: 'es_ES.UTF-8' } })
+  expect((await open($, clock)).text).toBe('Panel de Backlog abierto.')
+})
+
+test('auto: an English setting wins over a Spanish locale', async ($, on) => {
+  const { clock } = world(on, { settings: { language: 'English' }, env: { LC_ALL: 'es_ES.UTF-8' } })
+  expect((await open($, clock)).text).toBe('Backlog pane opened.')
+})
+
+test('with no surface, /backlog answers in Spanish too', { options: { language: 'es' } }, async ($, on) => {
+  const { clock } = world(on, { surfaces: [] })
+  const answer = await open($, clock)
+  expect(answer.text).toContain('Backlog: 3 tareas')
+  expect(answer.text).toContain('BL-2  Add login')
+})
 
 test('a missing CLI says how to install it', async ($, on) => {
   const { clock } = world(on, { installed: false })

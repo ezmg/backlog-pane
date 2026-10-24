@@ -3,12 +3,9 @@
 // can cover it directly.
 
 import type { Checklist, TaskDetail, TaskSummary } from '../types'
+import type { Strings } from './i18n'
 
 export const DEFAULT_STATUSES = ['To Do', 'In Progress', 'Done']
-
-/** The prompt "Work on this task" leaves in the prompt box. */
-export const workPrompt = (id: string) =>
-  `Work on ${id} only. Research the codebase and write an implementation plan in the task. Wait for my approval before coding.`
 
 export const args = {
   version: () => ['--version'],
@@ -206,14 +203,14 @@ export function groupTasks(tasks: TaskSummary[], statuses: string[], doneLimit: 
 }
 
 /** The board as plain text, for surfaces that draw no pane. */
-export function summarize(tasks: TaskSummary[], statuses: string[]): string {
-  if (tasks.length === 0) return 'Backlog: no tasks yet. Create one with `backlog task create "Title"`.'
-  const lines = [`Backlog: ${tasks.length} task${tasks.length === 1 ? '' : 's'}`]
+export function summarize(tasks: TaskSummary[], statuses: string[], t: Strings): string {
+  if (tasks.length === 0) return t.summaryEmpty
+  const lines = [t.summaryCount(tasks.length)]
   for (const group of groupTasks(tasks, statuses, 5)) {
     if (group.total === 0) continue
     lines.push('', `${group.status} (${group.total})`)
     for (const task of group.tasks) lines.push(`  ${task.id}  ${task.title}`)
-    if (group.total > group.tasks.length) lines.push(`  … ${group.total - group.tasks.length} more`)
+    if (group.total > group.tasks.length) lines.push(`  ${t.summaryMore(group.total - group.tasks.length)}`)
   }
   return lines.join('\n')
 }

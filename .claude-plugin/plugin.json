@@ -2,11 +2,19 @@
   "name": "backlog-pane",
   "version": "0.1.0",
   "description": "A live Backlog.md board in a Claude Code side pane (unofficial).",
-  "author": { "name": "Velkyss" },
+  "author": {
+    "name": "Velkyss"
+  },
   "homepage": "https://github.com/ezmg/backlog-pane",
   "repository": "https://github.com/ezmg/backlog-pane",
   "license": "MIT",
-  "keywords": ["backlog.md", "tasks", "kanban", "mod", "pane"],
+  "keywords": [
+    "backlog.md",
+    "tasks",
+    "kanban",
+    "mod",
+    "pane"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "backlogPath": {
@@ -20,6 +28,17 @@
       "title": "Done tasks shown",
       "description": "How many of the most recent tasks in the final status to list when that group is expanded.",
       "default": 5
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "The pane's language: auto (Claude Code's language setting, then LC_ALL, LC_MESSAGES, LANG, then the system locale), en (English) or es (Spanish).",
+      "options": [
+        "auto",
+        "en",
+        "es"
+      ],
+      "default": "auto"
     }
   }
 }

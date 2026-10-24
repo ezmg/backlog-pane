@@ -20,13 +20,13 @@ import {
   readTaskList,
   readTaskView,
   summarize,
-  workPrompt,
 } from './cli'
+import { detectLanguage, strings } from './i18n'
+import type { Language, Strings } from './i18n'
 
 type Engine = EngineInterface
 
 const PANE = 'backlog'
-const TITLE = 'Backlog'
 const COMMAND = 'backlog'
 const MAX_ATTEMPTS = 5
 
@@ -43,10 +43,44 @@ type Run = { ok: true; stdout: string } | { ok: false; stderr: string }
 // Read from the plugin's options each time the module loads.
 let configured = ''
 let doneLimit = 5
+let languageOption: unknown = 'auto'
+// The language shown, detected once per load.
+let language: Language | null = null
 // The executable that answered `--version`; found again after a reload.
 let bin: string | null = null
 // The watch loop in progress, if any.
 let active: { isStopped: boolean; stop: () => void } | null = null
+
+/**
+ * The strings in the language the `language` option names, or for `auto`
+ * the one Claude Code's `language` setting, the locale variables or the
+ * runtime's locale say, in that order.
+ */
+async function text($: Engine): Promise<Strings> {
+  if (!language) {
+    let setting: unknown
+    try {
+      setting = await $.settings.read({ key: 'language' })
+    } catch {
+      // No settings to read here; the locale decides.
+    }
+    let intl: string | undefined
+    try {
+      intl = new Intl.DateTimeFormat().resolvedOptions().locale
+    } catch {
+      // No Intl in this runtime.
+    }
+    language = detectLanguage({
+      option: languageOption,
+      setting,
+      lcAll: await $.env.get('LC_ALL'),
+      lcMessages: await $.env.get('LC_MESSAGES'),
+      lang: await $.env.get('LANG'),
+      intl,
+    })
+  }
+  return strings(language)
+}
 
 async function findBin($: Engine): Promise<string | null> {
   if (bin) return bin
@@ -69,7 +103,7 @@ async function findBin($: Engine): Promise<string | null> {
 
 async function backlog($: Engine, argv: string[]): Promise<Run> {
   const exe = await findBin($)
-  if (!exe) return { ok: false, stderr: 'The backlog CLI was not found.' }
+  if (!exe) return { ok: false, stderr: (await text($)).cliNotFound }
   try {
     const done = await $.process.run([exe, ...argv], { timeoutMs: 60_000 })
     return done.exitCode === 0
@@ -89,7 +123,8 @@ async function loadDetail($: Engine, id: string) {
   const run = await backlog($, args.view(id))
   if ((await read($, selectedId)) !== id) return
   if (!run.ok) {
-    await update($, notice, () => errorLine(run.stderr, `Could not read ${id}.`))
+    const t = await text($)
+    await update($, notice, () => errorLine(run.stderr, t.couldNotRead(id)))
     return
   }
   const task = readTaskView(safeParse(run.stdout))
@@ -152,7 +187,7 @@ async function watch($: Engine) {
       // A watch that delivered lists and then ended starts the count over.
       failures = isListed ? 1 : failures + 1
       if (failures >= MAX_ATTEMPTS) {
-        const message = errorLine(stderr, 'backlog task list --watch kept stopping.')
+        const message = errorLine(stderr, (await text($)).watchStopping)
         await update($, phase, () => ({ kind: 'failed', message }) as Phase)
         return
       }
@@ -194,7 +229,8 @@ async function select($: Engine, id: string | null) {
 
 async function setStatus($: Engine, id: string, status: string) {
   const run = await backlog($, args.setStatus(id, status))
-  await update($, notice, () => (run.ok ? `Moved ${id} to ${status}.` : errorLine(run.stderr, `Could not move ${id}.`)))
+  const t = await text($)
+  await update($, notice, () => (run.ok ? t.moved(id, status) : errorLine(run.stderr, t.couldNotMove(id))))
   if (run.ok) await loadDetail($, id)
 }
 
@@ -202,34 +238,34 @@ async function create($: Engine, title: string) {
   const name = title.trim()
   if (!name) return
   const run = await backlog($, args.create(name))
+  const t = await text($)
   await update($, notice, () =>
-    run.ok ? `Created ${createdId(run.stdout) ?? 'the task'}.` : errorLine(run.stderr, 'Could not create the task.'),
+    run.ok ? t.created(createdId(run.stdout) ?? t.theTask) : errorLine(run.stderr, t.couldNotCreate),
   )
 }
 
 async function work($: Engine, id: string) {
-  const text = workPrompt(id)
+  const t = await text($)
+  const draft = t.workPrompt(id)
   const box = await $.prompt.read()
   const filled =
     box.text.trim() === ''
-      ? await $.prompt.fill({ text, mode: 'replace' })
-      : await $.prompt.fill({ text: `\n\n${text}`, mode: 'append' })
-  if (filled.isFilled) {
-    await update($, notice, () => `Draft for ${id} is in the prompt box. Review it, then press Enter to send.`)
-  } else {
-    await update($, notice, () => `The prompt box did not take the draft. Copy it instead: ${text}`)
-  }
+      ? await $.prompt.fill({ text: draft, mode: 'replace' })
+      : await $.prompt.fill({ text: `\n\n${draft}`, mode: 'append' })
+  await update($, notice, () => (filled.isFilled ? t.draftReady(id) : t.draftRejected(draft)))
 }
 
 export const register: Register = (on, options) => {
   configured = typeof options.backlogPath === 'string' ? options.backlogPath : ''
   doneLimit = typeof options.doneLimit === 'number' ? options.doneLimit : 5
+  languageOption = options.language
+  language = null
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await $.command.register({
       name: COMMAND,
-      description: 'Open the Backlog.md board in a side pane',
+      description: (await text($)).commandDescription,
     })
     // After a reload the pane may still be up: pick its watch up again.
     if ((await $.ui.panes()).some(pane => pane.id === PANE)) startWatch($)
@@ -237,23 +273,21 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: COMMAND }, async $ => {
+    const t = await text($)
     if ((await $.session.surfaces()).length === 0) {
       const run = await backlog($, args.list())
       if (!run.ok) {
-        if (!(await findBin($))) return { text: 'Backlog.md CLI not found. Install it with `npm i -g backlog.md`.' }
+        if (!(await findBin($))) return { text: t.cliMissingText }
         return {
-          text:
-            classify(run.stderr) === 'not-initialized'
-              ? 'No Backlog.md project here. Run `backlog init` first.'
-              : errorLine(run.stderr, 'backlog task list failed.'),
+          text: classify(run.stderr) === 'not-initialized' ? t.noProjectText : errorLine(run.stderr, t.listFailed),
         }
       }
       await loadStatuses($)
-      return { text: summarize(readTaskList(safeParse(run.stdout)) ?? [], await read($, statuses)) }
+      return { text: summarize(readTaskList(safeParse(run.stdout)) ?? [], await read($, statuses), t) }
     }
-    const opened = await $.ui.open({ id: PANE, title: TITLE })
+    const opened = await $.ui.open({ id: PANE, title: t.paneTitle })
     startWatch($)
-    return { text: opened.isPlaced ? 'Backlog pane opened.' : `Backlog pane is waiting for room (${opened.reason}).` }
+    return { text: opened.isPlaced ? t.opened : t.waitingForRoom(opened.reason) }
   })
 
   on('ui.close', { id: PANE }, async ($, e, next) => {
@@ -269,23 +303,24 @@ export const register: Register = (on, options) => {
     const hasForms = e.surface === 'terminal' || e.surface === 'desktop' || e.surface === 'vscode'
     const Input = hasForms && 'Input' in ui ? ui.Input : undefined
     const Select = hasForms && 'Select' in ui ? ui.Select : undefined
+    const t = await text($)
     const now = await read($, phase)
     const message = await read($, notice)
 
     const section = (title: string, body: string | null) => (
       <Box flexDirection="column">
         <Text bold>{title}</Text>
-        {body?.trim() ? <Markdown text={body} /> : <Text dimColor>None.</Text>}
+        {body?.trim() ? <Markdown text={body} /> : <Text dimColor>{t.none}</Text>}
       </Box>
     )
-    const retryButton =<Button key="retry" variant="primary" label="Retry" onPress={() => retry($)} />
+    const retryButton = <Button key="retry" variant="primary" label={t.retry} onPress={() => retry($)} />
     const footer = message ? <Text dimColor>{message}</Text> : null
 
     if (now.kind === 'not-installed') {
       return (
         <Box flexDirection="column" gap={1}>
-          <Text bold>Backlog.md CLI not found</Text>
-          <Markdown text={'Install it with `npm i -g backlog.md` (or `bun add -g backlog.md`, `brew install backlog-md`), then press Retry. You can also set the full path in the plugin option **backlogPath**.'} />
+          <Text bold>{t.notInstalledTitle}</Text>
+          <Markdown text={t.notInstalledHelp} />
           {retryButton}
         </Box>
       )
@@ -293,8 +328,8 @@ export const register: Register = (on, options) => {
     if (now.kind === 'not-initialized') {
       return (
         <Box flexDirection="column" gap={1}>
-          <Text bold>No Backlog.md project in this folder</Text>
-          <Markdown text={'Run `backlog init` in the project root, then press Retry.'} />
+          <Text bold>{t.notInitializedTitle}</Text>
+          <Markdown text={t.notInitializedHelp} />
           {retryButton}
         </Box>
       )
@@ -302,14 +337,14 @@ export const register: Register = (on, options) => {
     if (now.kind === 'failed') {
       return (
         <Box flexDirection="column" gap={1}>
-          <Text bold color="red">The live task list stopped</Text>
+          <Text bold color="error">{t.failedTitle}</Text>
           <Text>{now.message}</Text>
           {retryButton}
         </Box>
       )
     }
     if (now.kind !== 'ready') {
-      return <Text dimColor>Loading tasks…</Text>
+      return <Text dimColor>{t.loadingTasks}</Text>
     }
 
     const id = await read($, selectedId)
@@ -323,14 +358,14 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" gap={1}>
-            <Button key="back" plain label="← Back" onPress={() => select($, null)} />
+            <Button key="back" plain label={t.back} onPress={() => select($, null)} />
             <Text dimColor>{id}</Text>
           </Box>
           <Text bold>{task?.title ?? summary?.title ?? id}</Text>
           {Select ? (
             <Select
               key="status"
-              label="Status"
+              label={t.status}
               value={status}
               options={choices.map(one => ({ value: one, label: one }))}
               onSelect={value => (value !== status ? setStatus($, id, value) : undefined)}
@@ -342,14 +377,14 @@ export const register: Register = (on, options) => {
               ))}
             </Box>
           )}
-          <Button key="work" variant="primary" label="Work on this task" onPress={() => work($, id)} />
+          <Button key="work" variant="primary" label={t.work} onPress={() => work($, id)} />
           {footer}
-          {!task ? <Text dimColor>Loading details…</Text> : null}
-          {task ? section('Description', task.description) : null}
+          {!task ? <Text dimColor>{t.loadingDetails}</Text> : null}
+          {task ? section(t.description, task.description) : null}
           {task ? (
             <Box flexDirection="column">
-              <Text bold>Acceptance criteria</Text>
-              {task.acceptanceCriteria.length === 0 ? <Text dimColor>None.</Text> : null}
+              <Text bold>{t.criteria}</Text>
+              {task.acceptanceCriteria.length === 0 ? <Text dimColor>{t.none}</Text> : null}
               {task.acceptanceCriteria.map(item => (
                 <Text dimColor={item.checked}>
                   {item.checked ? '[x]' : '[ ]'} {item.index}. {item.text}
@@ -357,7 +392,7 @@ export const register: Register = (on, options) => {
               ))}
             </Box>
           ) : null}
-          {task ? section('Implementation plan', task.implementationPlan) : null}
+          {task ? section(t.plan, task.implementationPlan) : null}
         </Box>
       )
     }
@@ -368,10 +403,10 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" gap={1}>
         {Input ? (
-          <Input key="new-task" placeholder="New task title" submitLabel="Create" onSubmit={value => create($, value)} />
+          <Input key="new-task" placeholder={t.newTaskPlaceholder} submitLabel={t.create} onSubmit={value => create($, value)} />
         ) : null}
         {footer}
-        {list.length === 0 ? <Text dimColor>No tasks yet.</Text> : null}
+        {list.length === 0 ? <Text dimColor>{t.noTasks}</Text> : null}
         {groups.map(group => {
           const rows = group.tasks.map(task => (
             <Button key={`task:${task.id}`} plain onPress={() => select($, task.id)}>
@@ -394,9 +429,7 @@ export const register: Register = (on, options) => {
                 </Button>
                 {isOpen ? rows : null}
                 {isOpen && group.total > group.tasks.length ? (
-                  <Text dimColor>
-                    The {group.tasks.length} most recent of {group.total}.
-                  </Text>
+                  <Text dimColor>{t.mostRecent(group.tasks.length, group.total)}</Text>
                 ) : null}
               </Box>
             )
