@@ -85,6 +85,8 @@ export type World = {
   // Backlog.md reads its statuses from somewhere else than the file the
   // mod finds: a write is never seen.
   isConfigElsewhere?: boolean
+  // What $.store holds at the start (the mod's per-project prefs).
+  store?: Record<string, unknown>
   env?: Record<string, string>
   // Claude Code's settings, as `$.settings.read` answers them.
   settings?: Record<string, unknown>
@@ -184,6 +186,12 @@ export function world(on: On, options: World = {}) {
     return { value: undefined }
   })
   on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
+  const store = new Map<string, unknown>(Object.entries(options.store ?? {}))
+  on('store.get', (_, e) => ({ value: store.get(e.key) }))
+  on('store.set', (_, e) => {
+    store.set(e.key, e.value)
+    return { value: undefined }
+  })
   on('fs.read', (_, e) => {
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
@@ -245,7 +253,7 @@ export function world(on: On, options: World = {}) {
   })
   /** The `task edit` commands run so far. */
   const edits = () => runs.filter(argv => argv[0] === 'task' && argv[1] === 'edit')
-  return { runs, edits, editorRuns, fills, files, configPath, clock, spawnCount: () => spawns }
+  return { runs, edits, editorRuns, fills, files, configPath, store, clock, spawnCount: () => spawns }
 }
 
 export async function open($: Engine, clock: { settle: () => Promise<void> }) {
@@ -259,6 +267,9 @@ export async function open($: Engine, clock: { settle: () => Promise<void> }) {
   await clock.settle()
   return answer
 }
+
+/** The $.store key a project's prefs are kept under: its config's path. */
+export const PREFS_KEY = `project:${CWD}/backlog/config.yml`
 
 export type Drawing = Mounted<RenderSurface, 'Pane'>
 type BoardDrawing = Mounted<'terminal' | 'desktop', 'Pane'>

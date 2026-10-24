@@ -4,7 +4,7 @@
 
 import type { ThemeKey } from 'claude-code'
 
-import type { Checklist, TaskDetail, TaskSummary } from '../types'
+import type { Checklist, Prefs, TaskDetail, TaskSummary } from '../types'
 import type { Strings } from './i18n'
 
 export const DEFAULT_STATUSES = ['To Do', 'In Progress', 'Done']
@@ -315,12 +315,13 @@ export function groupTasks(
   statuses: string[],
   doneLimit: number,
   closed: readonly string[] = [],
+  chosen: Readonly<Record<string, string>> = {},
 ): Group[] {
   const order = statuses.length > 0 ? statuses : DEFAULT_STATUSES
   const final = order[order.length - 1]
   const names = [...order]
   for (const task of tasks) if (!names.includes(task.status)) names.push(task.status)
-  const colors = statusColors(names, final ?? '', closed)
+  const colors = statusColors(names, final ?? '', closed, chosen)
   return names.map(status => {
     let list = tasks.filter(task => task.status === status)
     const total = list.length
@@ -333,22 +334,63 @@ export function groupTasks(
   })
 }
 
-const ROTATION: ThemeKey[] = ['permission', 'planMode', 'ide', 'merged']
+// planMode first: permission draws much like suggestion (the first status's).
+const ROTATION: ThemeKey[] = ['planMode', 'merged', 'ide', 'permission']
+
+/** The theme colours a status can be given in the statuses view, in the order offered. */
+export const PALETTE: ThemeKey[] = [
+  'suggestion',
+  'ide',
+  'planMode',
+  'success',
+  'warning',
+  'claude',
+  'error',
+  'merged',
+  'permission',
+  'inactive',
+]
+
+export const isPaletteColor = (value: unknown): value is ThemeKey =>
+  typeof value === 'string' && (PALETTE as string[]).includes(value)
+
+/**
+ * What the pane keeps per project (in `$.store`, as Backlog.md's config has
+ * no place for it), as stored, keeping only what is well formed: a colour
+ * of the palette chosen for a status, and which statuses are closed.
+ */
+export function readPrefs(value: unknown): Prefs {
+  const raw = isRecord(value) ? value : {}
+  const colors: Record<string, string> = {}
+  if (isRecord(raw.colors)) {
+    for (const [status, color] of Object.entries(raw.colors)) if (isPaletteColor(color)) colors[status] = color
+  }
+  const closed = Array.isArray(raw.closed) ? raw.closed.filter(one => typeof one === 'string') : undefined
+  return closed ? { colors, closed } : { colors }
+}
 const IN_PROGRESS = /in[ -]?progress|en (curso|progreso)|doing|wip/i
 
 /**
  * Each status's colour, by theme key so it follows the person's light or
- * dark theme: the final one `success`, closed ones `inactive`, one named
+ * dark theme: the one chosen for it in `chosen` if any; else the final one
+ * `success`, closed ones `inactive`, one named
  * like "In Progress" `warning`, the first of the rest `suggestion`, and the
  * others in turn from ROTATION. `names` is every status shown, in order;
  * `final` the configured last.
  */
-export function statusColors(names: string[], final: string, closed: readonly string[] = []): Map<string, ThemeKey> {
+export function statusColors(
+  names: string[],
+  final: string,
+  closed: readonly string[] = [],
+  chosen: Readonly<Record<string, string>> = {},
+): Map<string, ThemeKey> {
   const colors = new Map<string, ThemeKey>()
   let turn = 0
   let isFirstOpen = true
   for (const name of names) {
-    if (name === final) colors.set(name, 'success')
+    const picked = chosen[name]
+    if (isPaletteColor(picked)) colors.set(name, picked)
+    else if (name === final) colors.set(name, 'success')
     else if (isClosedStatus(name, closed)) colors.set(name, 'inactive')
     else if (IN_PROGRESS.test(name)) colors.set(name, 'warning')
     else if (isFirstOpen) colors.set(name, 'suggestion')

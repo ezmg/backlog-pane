@@ -62,6 +62,9 @@ export type BoardProps = {
 /** What the board's surface module posts to the hooks module. */
 export type BoardMessage = { type: 'move'; id: string; status: string } | { type: 'open'; id: string }
 
+/** A project's colours (theme keys) and closed statuses; `closed` absent: the option's. */
+export type Prefs = { colors: Record<string, string>; closed?: string[] }
+
 declare module 'claude-code' {
   interface PluginState {
     'backlog-pane': {
@@ -78,6 +81,8 @@ declare module 'claude-code' {
       isBoardFailed: boolean
       isManagingStatuses: boolean
       newStatusAt: number | null
+      prefs: Prefs
+      prefsKey: string | null
     }
   }
 }

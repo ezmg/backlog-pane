@@ -173,14 +173,14 @@ describe('colours', () => {
     const colors = statusColors(['Backlog', 'Ready', 'In Progress', 'Review', 'QA', 'Blocked', 'Later', 'Done', 'Odd'], 'Done')
     expect(Object.fromEntries(colors)).toEqual({
       Backlog: 'suggestion',
-      Ready: 'permission',
+      Ready: 'planMode',
       'In Progress': 'warning',
-      Review: 'planMode',
+      Review: 'merged',
       QA: 'ide',
-      Blocked: 'merged',
-      Later: 'permission',
+      Blocked: 'permission',
+      Later: 'planMode',
       Done: 'success',
-      Odd: 'planMode',
+      Odd: 'merged',
     })
     expect(Object.fromEntries(statusColors(['To Do', 'In Progress', 'Done'], 'Done'))).toEqual({
       'To Do': 'suggestion',
@@ -192,7 +192,7 @@ describe('colours', () => {
 
   test('groups carry their colour', async () => {
     const groups = groupTasks([task('A-1', 'Review')], ['To Do', 'In Progress', 'Done'], 5)
-    expect(groups.map(group => group.color)).toEqual(['suggestion', 'warning', 'success', 'permission'])
+    expect(groups.map(group => group.color)).toEqual(['suggestion', 'warning', 'success', 'planMode'])
   })
 
   test('high priority, whatever the case', async () => {

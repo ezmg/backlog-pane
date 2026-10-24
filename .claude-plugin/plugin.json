@@ -1,6 +1,6 @@
 {
   "name": "backlog-pane",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A live Backlog.md board in a Claude Code side pane (unofficial).",
   "author": {
     "name": "Velkyss"
@@ -32,7 +32,7 @@
     "closedStatuses": {
       "type": "string",
       "title": "Closed statuses",
-      "description": "Statuses that count as closed besides the final one, separated by commas (for example: Cancelled). They are drawn dim and folded like the final status, and ◀/▶ and the board's arrow keys skip them.",
+      "description": "Optional. Statuses that start as closed in a project where no Closed box was ticked yet in Statuses… (comma-separated, for example: Cancelled). Closed ones are folded and dim, and ◀/▶ and the board's arrow keys skip them.",
       "default": ""
     },
     "language": {
