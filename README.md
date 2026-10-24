@@ -1,4 +1,8 @@
+<img src=".claude-plugin/icon.png" alt="" width="96" align="right">
+
 # backlog-pane
+
+**English** · [Español](README.es.md)
 
 A live [Backlog.md](https://github.com/MrLesk/Backlog.md) board in a Claude Code side pane.
 
@@ -286,6 +290,7 @@ the pane shows the error and a **Retry** button.
 ```text
 .claude-plugin/plugin.json        manifest and options
 .claude-plugin/marketplace.json   makes this repository installable
+.claude-plugin/icon.png           the plugin's icon
 hooks/register.tsx                command, pane, watch loop and actions
 hooks/board.tsx                   the board's Client surface module (terminal, desktop)
 hooks/cli.ts                      pure helpers: commands, JSON stream reader, grouping, colours, editor
@@ -342,7 +347,8 @@ cover:
 - both drafts;
 - the missing-CLI, uninitialized, failing-watch and headless states.
 
-They run on the terminal, desktop, VS Code and mobile surfaces where each applies. Under
+They run on the terminal, desktop, VS Code and mobile surfaces where each applies, and give
+the same result whatever the machine's language. Under
 2.1.296 the six tests that pretend to run on 2.1.301 or later (the inline field) fail, as
 expected: that kit does not draw `rows`.
 
