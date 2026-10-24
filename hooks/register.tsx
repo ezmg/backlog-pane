@@ -37,8 +37,8 @@ type Engine = EngineInterface
 const PANE = 'backlog'
 const COMMAND = 'backlog'
 const MAX_ATTEMPTS = 5
-// The release whose Input took `rows`: an older engine refuses the whole
-// tree that names it, so the external editor stands in there.
+// The release whose Input took `rows`. An older engine does not draw it (or
+// refuses the tree that names it), so the external editor stands in there.
 const MULTILINE_SINCE = '2.1.301'
 // How long the external editor may stay open: $.process.run's longest.
 const EDITOR_TIMEOUT_MS = 600_000
@@ -53,7 +53,7 @@ const selectedId = atom({ plugin: 'backlog-pane', key: 'selectedId' } as const, 
 const detail = atom({ plugin: 'backlog-pane', key: 'detail' } as const, null as TaskDetail | null)
 const isDoneOpen = atom({ plugin: 'backlog-pane', key: 'isDoneOpen' } as const, false)
 const notice = atom({ plugin: 'backlog-pane', key: 'notice' } as const, null as string | null)
-// What the task view is editing: `title`, `description`, `plan`, a criterion
+// What the task view is editing: `description`, `plan`, a criterion
 // (`criterion:<index>`), or the criterion awaiting a delete (`remove:<index>`).
 const editing = atom({ plugin: 'backlog-pane', key: 'editing' } as const, null as string | null)
 const isCreating = atom({ plugin: 'backlog-pane', key: 'isCreating' } as const, false)
