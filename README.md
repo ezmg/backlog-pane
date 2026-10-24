@@ -19,11 +19,18 @@ for you**.
 
 ## Features
 
-- **Live board.** On the terminal and the desktop app, one column per status in your
-  configured order. Drag a card to another column to move it, or use the keyboard (see
-  [Shortcuts](#shortcuts)). The final status (usually *Done*) shows only its most recent
-  tasks. VS Code and mobile show the same tasks as a list grouped by status, with the
-  final status folded.
+- **Live board.** On the terminal and the desktop app, one bordered column per status in
+  your configured order, headed by the status as a chip in its colour. Each card shows its
+  title (on two lines if it needs them), its ID and its criteria done. Drag a card to
+  another column to move it, or use the keyboard (see [Shortcuts](#shortcuts)). The final
+  status (usually *Done*) shows only its most recent tasks. VS Code and mobile show the
+  same tasks as a list grouped by status, with the final status folded.
+- **Closed statuses.** List statuses such as *Cancelled* in the `closedStatuses` option.
+  They are drawn dim and folded like the final status, and ◀/▶ and the board's arrow keys
+  skip them. You can still move a task there with the status picker or by dragging.
+- **Create and delete statuses.** **Statuses…** lists every status with its task count.
+  Add one and pick where it goes (at the start, or after any status), or delete one that no
+  task is in.
 - **Colours that follow your theme.** Statuses use theme colours, so they suit light and
   dark themes: the first status, an *In Progress* one, and the final one each have their
   own, and the others take turns. High-priority tasks get a **`!`** in the error colour,
@@ -52,8 +59,10 @@ for you**.
   below it. Nothing is submitted.
 - **English and Spanish.** The pane, the command and both drafts. See the `language`
   option.
-- **CLI only.** Every change runs a `backlog` command (`task edit`, `task create`). The mod
-  never edits the Markdown files itself.
+- **CLI only, with one exception.** Every change to a task runs a `backlog` command
+  (`task edit`, `task create`); the mod never edits the task files. Backlog.md has no
+  command that changes the list of statuses, so creating or deleting one rewrites only the
+  `statuses:` line of Backlog.md's config (see [Statuses](#statuses)).
 - **Clear errors.** The pane tells you, with a **Retry** button, when the CLI is not
   installed, the folder has no Backlog.md project, or the live list keeps failing.
 
@@ -67,16 +76,43 @@ controls and Esc returns to the prompt.
 | Board (terminal, desktop) | Drag a card to another column | Moves the task there. |
 | Board | Click a card, then another column | Moves the selected card there. |
 | Board | Click the selected card again | Opens the task. |
-| Board, after a click on it | `←` / `→` | Moves the selected card one column left or right. |
-| Board, after a click on it | `↑` / `↓` | Selects the card above or below. The first key selects the first card. |
+| Board, after a click on it | `←` / `→` | Moves the selected card to the next open column left or right, skipping closed ones. |
+| Board, after a click on it | `↑` / `↓` | Selects the card above or below. The first key selects the first card of the first open column. |
 | Board, after a click on it | `Enter` | Opens the selected task. |
 | Board | `Esc` | Gives the keyboard back. |
-| Task view | `h` | Moves the task to the previous status (◀). |
-| Task view | `l` | Moves the task to the next status (▶). |
+| Task view | `h` | Moves the task to the previous open status (◀). |
+| Task view | `l` | Moves the task to the next open status (▶). |
 | Multi-line field | `Enter` | Saves. |
 | Multi-line field | `Shift+Enter`, or `\` then `Enter` | Starts a new line. |
 
 `h` and `l` work while the pane has the keyboard, not while you type in the prompt box.
+
+## Statuses
+
+Statuses belong to each project: Backlog.md keeps them in its config (`backlog/config.yml`,
+or `backlog.config.yml` / `.backlog/config.yml`). The pane reads them with
+`backlog config get statuses` and draws the columns in that order. The last one is the
+final ("done") status, the same rule Backlog.md uses.
+
+**Statuses…** (beside **+ New task**) opens a list of them:
+
+- **Add one:** pick its **Position** (at the start, or after any status; by default before
+  the final one), type its name and press Enter. A name can't be empty, repeat another
+  (whatever the case), hold a comma, a quote or a line break, or pass 40 characters.
+- **Delete one:** **Delete** shows only beside a status no task is in, and asks first.
+  The status new tasks start in (`backlog config get defaultStatus`) is kept, and a project
+  always keeps at least two.
+
+Backlog.md has no command for this, so the pane:
+
+1. finds the config as Backlog.md does, from the session's folder up;
+2. rewrites only its `statuses:` line, every other line left as it was;
+3. runs `backlog config get statuses`, and if Backlog.md does not read exactly the new list,
+   puts the file back as it was and says so.
+
+**Closed statuses** are set in the plugin option `closedStatuses`, for example `Cancelled`
+(several separated by commas; case does not matter). The final status is always final,
+listed or not.
 
 ## Editing long text
 
@@ -112,16 +148,26 @@ The pane waits up to ten minutes. After that the edit is not applied.
 _Screenshots are coming. Until then, this is a text preview of the terminal pane:_
 
 ```text
-┌ Backlog ─────────────────────────────────────────────────────┐
-│ [ + New task ]                                               │
-│                                                              │
-│ To Do (2)           In Progress (1)     Done (12)            │
-│ ! BL-2 Add login      BL-1 Write parser   BL-9 Old work      │
-│   BL-5 Rate limiting                      BL-8 Fix CI        │
-│                                                              │
-│ Drag a card to another column, or click it and press ←/→ …   │
-└──────────────────────────────────────────────────────────────┘
+[ + New task ] [ Statuses… ]
+
+╭─────────────╮ ╭─────────────╮ ╭─────────────╮ ╭─────────────╮
+│  Cancell… 1 │ │  To Do  1   │ │  In Prog… 1 │ │  Done  2    │
+│             │ │             │ │             │ │             │
+│ Old export  │ │ ! Rate      │ │ ! Write the │ │ Add login   │
+│ idea        │ │   limiting… │ │   JSON str… │ │ page        │
+│ TASK-5      │ │ TASK-3      │ │ TASK-1 · 1… │ │ TASK-2      │
+│             │ │             │ │             │ │             │
+│             │ │             │ │             │ │ Dark mode   │
+│             │ │             │ │             │ │ TASK-4      │
+│             │ │             │ │             │ │             │
+╰─────────────╯ ╰─────────────╯ ╰─────────────╯ ╰─────────────╯
+Drag a card to another column, or click it and press ←/→ to move
+it, ↑/↓ to pick another, Enter to open it.
 ```
+
+_That is the pane docked in a 150-column terminal (Claude Code 2.1.310), with Cancelled
+as a closed status. On screen, each status is a chip in its colour, its column's border
+takes that colour, and Cancelled is dimmed._
 
 ## Requirements
 
@@ -179,11 +225,13 @@ To close the pane, click its close mark or press `ctrl+x` then `x`. Closing it s
 | Option | Default | What it does |
 | --- | --- | --- |
 | `backlogPath` | *(empty)* | Full path to the `backlog` executable. When empty, the mod tries `backlog` on PATH. On Windows it then tries the native binaries npm and bun install globally. |
-| `doneLimit` | `5` | How many of the most recent tasks in the final status the board shows, and the list shows when that group is unfolded. |
+| `doneLimit` | `5` | How many of the most recent tasks in the final status (and in each closed status) the board shows, and the list shows when that group is unfolded. |
+| `closedStatuses` | *(empty)* | Statuses that count as closed besides the final one, separated by commas (for example `Cancelled`). They are drawn dim and folded, and ◀/▶ and the board's arrow keys skip them. |
 | `language` | `auto` | `en` (English), `es` (Spanish), or `auto`. With `auto` the mod uses the first of these that is set: Claude Code's `language` setting (free text such as `Español`, `Spanish` or `English`), then `LC_ALL`, `LC_MESSAGES`, `LANG`, then the system locale. If none is set, it uses English. Any language other than Spanish shows English. |
 
 Change them under the plugin's settings in `/plugin`. In a session that loads the mod from
-a folder, they appear as rows in `/config`.
+a folder, they appear as rows in `/config`, and are stored in your user settings
+(`~/.claude/settings.json`, under `pluginConfigs`), not in the project's.
 
 ## Where it works
 
@@ -238,6 +286,8 @@ things to know:
 | Priorities | `backlog config get priorities` |
 | Task details | `backlog task view <id> --json` |
 | Change status (picker, ◀ ▶, board) | `backlog task edit <id> --status <status>` |
+| Create / delete a status | Rewrites the `statuses:` line of Backlog.md's config, then checks it with `backlog config get statuses` (the one write outside the CLI) |
+| Status new tasks start in | `backlog config get defaultStatus` |
 | Create a task | `backlog task create <title>` |
 | Rename | `backlog task edit <id> -t <title>` |
 | Set priority | `backlog task edit <id> --priority <priority>` |
@@ -268,8 +318,13 @@ the pane shows the error and a **Retry** button.
   `backlog config set defaultEditor "\"C:\Program Files\Microsoft VS Code\Code.exe\" --wait"`.
 - The pane waits for the external editor for up to ten minutes, and the temp file stays
   in the temp folder afterwards.
-- Board cards are one row each, so long titles are cut. With many statuses in a narrow
-  pane the columns get narrow (8 cells at least).
+- Board titles take two lines at most, so long ones are cut. With many statuses in a
+  narrow pane the columns get narrow (12 cells at least).
+- **Statuses:** the pane writes the list in the form `backlog init` uses
+  (`statuses: ["To Do", "Done"]`). A list written one item per line becomes that one
+  line, and a comment on those lines is lost. Task counts leave out drafts and archived
+  tasks, so a status an archived task is in can still be deleted. The pane does not
+  reorder or rename existing statuses: edit the config for that.
 - **Not yet:** plan approval, automatic sync when Claude finishes, milestones and the
   definition of done. Subtasks, dependencies, labels and assignees are not shown.
 - The live list covers what `task list` returns, so drafts and archived tasks are not
@@ -296,7 +351,7 @@ hooks/board.tsx                   the board's Client surface module (terminal, d
 hooks/cli.ts                      pure helpers: commands, JSON stream reader, grouping, colours, editor
 hooks/i18n.ts                     English and Spanish strings, language detection
 types/index.d.ts                  the $.state contract, the board's props, Backlog.md shapes
-tests/                            claude plugin test suites (fixtures.ts is the fake world)
+tests/                            claude plugin test suites (fixtures.ts is the fake world, with a fake config)
 ```
 
 Run the mod from a working copy for one session:
@@ -342,7 +397,8 @@ cover:
 
 - the stream reader, grouping, colours, and every command line;
 - language detection and both languages;
-- the board's pointer and keys, and the list fallback;
+- the board's layout, pointer and keys, and the list fallback;
+- closed statuses, and creating and deleting statuses (with the config rewrite and its check);
 - every editing control, the inline field and the external editor;
 - both drafts;
 - the missing-CLI, uninitialized, failing-watch and headless states.
