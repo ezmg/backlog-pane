@@ -7,7 +7,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BoardProps, Phase, Prefs, RedmineSettings, SyncConflict, SyncData, SyncView, TaskDetail, TaskSummary } from '../types'
+import type { BoardProps, Phase, Prefs, SyncConflict, SyncData, SyncLink, SyncSettings, SyncView, TaskDetail, TaskSummary } from '../types'
 import {
   JsonDocumentReader,
   args,
@@ -57,7 +57,8 @@ import {
   urls as redmineUrls,
 } from './redmine'
 import { EMPTY_SYNC, needsRead, othersTasks, plan, readSyncStore } from './sync'
-import type { LocalItem } from './sync'
+import type { Action, LocalItem } from './sync'
+import { decodeText, fromBase64, prioritiesOf, readExport, refFor, statusesOf, toRemoteRow } from './csv'
 import type { Language, Strings } from './i18n'
 
 type Engine = EngineInterface
@@ -243,7 +244,7 @@ async function loadSync($: Engine) {
   await update($, sync, now => ({ ...kept, isSyncing: now.isSyncing }))
 }
 
-async function saveSync($: Engine, change: (now: SyncView) => { settings: RedmineSettings | null; data: SyncData }) {
+async function saveSync($: Engine, change: (now: SyncView) => { settings: SyncSettings | null; data: SyncData }) {
   const next = await update($, sync, now => ({ ...change(now), isSyncing: now.isSyncing }))
   const key = await read($, prefsKey)
   if (!key) return
@@ -285,15 +286,26 @@ async function runSync($: Engine) {
   if (!settings || isSyncRunning) return
   const t = await text($)
   const base = normalizeUrl(settings.url)
-  const problem = !base ? t.badUrl : !settings.project.trim() ? t.badProject : !redmineKey ? t.apiKeyMissing : null
-  if (problem || !base) {
+  const isCsv = settings.provider === 'csv'
+  const problem = isCsv
+    ? !settings.file.trim()
+      ? t.badFile
+      : null
+    : !base
+      ? t.badUrl
+      : !settings.project.trim()
+        ? t.badProject
+        : !redmineKey
+          ? t.apiKeyMissing
+          : null
+  if (problem || (!isCsv && !base)) {
     await update($, notice, () => problem ?? t.badUrl)
     return
   }
   isSyncRunning = true
   await update($, sync, now => ({ ...now, isSyncing: true }))
   try {
-    const failed = await syncOnce($, settings, base, t)
+    const failed = isCsv ? await syncCsv($, settings, base, t) : await syncOnce($, settings, base ?? '', t)
     if (failed) {
       await saveSync($, now => ({ settings: now.settings, data: { ...now.data, lastError: failed } }))
       await update($, notice, () => failed)
@@ -304,8 +316,132 @@ async function runSync($: Engine) {
   }
 }
 
+/**
+ * The Backlog.md side of a sync: every task, with the description of the
+ * linked ones (or those naming an issue) that changed since the last sync.
+ * A string: the list failed, and why.
+ */
+async function readLocal($: Engine, data: SyncData, issueRefs: ReadonlySet<string>): Promise<LocalItem[] | string> {
+  const listed = await backlog($, args.list())
+  const tasksNow = listed.ok ? readTaskList(safeParse(listed.stdout)) : undefined
+  if (!tasksNow) return errorLine(listed.ok ? '' : listed.stderr, '')
+  const linked = new Set(Object.values(data.links).map(link => link.taskId))
+  const local: LocalItem[] = []
+  for (const task of tasksNow) {
+    const fields: LocalItem['fields'] = { title: task.title, status: task.status, priority: task.priority?.toLowerCase() ?? null }
+    const isLinked = linked.has(task.id) || task.references.some(ref => issueRefs.has(ref))
+    if (isLinked && needsRead(task.updatedAt, data.lastSync)) {
+      const run = await backlog($, args.view(task.id))
+      const detail = run.ok ? readTaskView(safeParse(run.stdout)) : undefined
+      if (detail) fields.description = detail.description ?? ''
+    }
+    local.push({ id: task.id, references: task.references, fields })
+  }
+  return local
+}
+
+/** Runs a create or edit in Backlog.md; on a failure the link stays as it was, to try again. */
+async function applyLocal(
+  $: Engine,
+  action: Extract<Action, { kind: 'create-local' | 'update-local' }>,
+  links: Record<string, SyncLink>,
+  data: SyncData,
+  warnings: string[],
+  t: Strings,
+): Promise<boolean> {
+  if (action.kind === 'create-local') {
+    const run = await backlog($, args.createFrom(action.fields, action.url))
+    const id = run.ok ? createdId(run.stdout) : undefined
+    if (id) {
+      links[action.key] = { taskId: id, base: action.fields }
+      return true
+    }
+    delete links[action.key]
+    warnings.push(t.localFailed(`#${action.key}`, errorLine(run.ok ? '' : run.stderr, '?')))
+    return false
+  }
+  const run = await backlog($, args.editFields(action.taskId, action.change))
+  if (run.ok) return true
+  // Tried again next time: the old base still differs.
+  const old = data.links[action.key]
+  if (old) links[action.key] = old
+  warnings.push(t.localFailed(action.taskId, errorLine(run.stderr, '?')))
+  return false
+}
+
+/** The CSV's path as $.fs takes it: `~` is the home folder. */
+async function filePath($: Engine, file: string): Promise<string> {
+  const path = file.trim().replace(/^"(.*)"$/, '$1')
+  if (!/^~[\\/]/.test(path)) return path
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) ?? ''
+  return home ? `${home}${path.slice(1)}` : path
+}
+
+/**
+ * One read of a CSV Redmine exported: read only, a field changed on both
+ * sides is a conflict. Answers what went wrong, if it could not run.
+ */
+async function syncCsv($: Engine, settings: SyncSettings, base: string | undefined, t: Strings): Promise<string | undefined> {
+  const path = await filePath($, settings.file)
+  let bytes: Uint8Array
+  try {
+    const { base64 } = (await $.fs.read(path, { as: 'bytes' })) as { base64: string }
+    bytes = fromBase64(base64)
+  } catch (error) {
+    return t.fileUnreadable(path, errorLine(String(error), '?'))
+  }
+  const file = readExport(decodeText(bytes))
+  if (!('rows' in file)) return t.csvColumns(file.headers.filter(Boolean).slice(0, 12).join(', '))
+
+  const remoteStatuses = statusesOf(file.rows)
+  const remotePriorities = prioritiesOf(file.rows)
+  const order = await read($, statuses)
+  const levels = await read($, priorities)
+  const statusMap = { ...defaultStatusMap(remoteStatuses, order), ...settings.statusMap }
+  const priorityMap = { ...defaultPriorityMap(remotePriorities, levels), ...settings.priorityMap }
+
+  const data = (await read($, sync)).data
+  const remote = file.rows.map(row => toRemoteRow(base, row, file.skip, statusMap, priorityMap, order[0] ?? ''))
+  const local = await readLocal($, data, new Set(remote.map(item => item.url)))
+  if (typeof local === 'string') return local || t.listFailed
+  const planned = plan({
+    remote,
+    local,
+    links: data.links,
+    conflicts: data.conflicts,
+    mode: 'read',
+    excluded: [],
+    createsRemote: false,
+    askOnClash: true,
+  })
+
+  const links = { ...planned.links }
+  const warnings = file.skip.length > 0 ? [t.csvMissing(file.skip.map(field => t.fieldNames[field] ?? field).join(', '))] : []
+  let fromRemote = 0
+  for (const action of planned.actions) {
+    if (action.kind !== 'create-local' && action.kind !== 'update-local') continue
+    if (await applyLocal($, action, links, data, warnings, t)) fromRemote++
+  }
+
+  const now = new Date(await $.clock.now()).toISOString()
+  await saveSync($, current => ({
+    settings: current.settings ? { ...current.settings, statusMap, priorityMap } : current.settings,
+    data: {
+      links,
+      conflicts: planned.conflicts,
+      meta: {},
+      statuses: remoteStatuses,
+      priorities: remotePriorities,
+      lastSync: now,
+      warnings,
+    },
+  }))
+  await update($, notice, () => t.csvDone(file.rows.length, fromRemote, planned.conflicts.length))
+  return undefined
+}
+
 /** One sync with Redmine; answers what went wrong, if it could not run. */
-async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: Strings): Promise<string | undefined> {
+async function syncOnce($: Engine, settings: SyncSettings, base: string, t: Strings): Promise<string | undefined> {
   const project = settings.project.trim()
   const found = await redmineCall($, 'GET', redmineUrls.project(base, project))
   if (!found.ok) return problemOf(t, found, project)
@@ -329,25 +465,9 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
   const statusMap = { ...defaultStatusMap(remoteStatuses, order), ...settings.statusMap }
   const priorityMap = { ...defaultPriorityMap(remotePriorities, levels), ...settings.priorityMap }
 
-  const listed = await backlog($, args.list())
-  const tasksNow = listed.ok ? readTaskList(safeParse(listed.stdout)) : undefined
-  if (!tasksNow) return errorLine(listed.ok ? '' : listed.stderr, t.listFailed)
-
-  const view = await read($, sync)
-  const data = view.data
-  const issueUrls = new Set(issues.map(issue => issueUrl(base, issue.id)))
-  const linked = new Set(Object.values(data.links).map(link => link.taskId))
-  const local: LocalItem[] = []
-  for (const task of tasksNow) {
-    const fields: LocalItem['fields'] = { title: task.title, status: task.status, priority: task.priority?.toLowerCase() ?? null }
-    const isLinked = linked.has(task.id) || task.references.some(ref => issueUrls.has(ref))
-    if (isLinked && needsRead(task.updatedAt, data.lastSync)) {
-      const run = await backlog($, args.view(task.id))
-      const detail = run.ok ? readTaskView(safeParse(run.stdout)) : undefined
-      if (detail) fields.description = detail.description ?? ''
-    }
-    local.push({ id: task.id, references: task.references, fields })
-  }
+  const data = (await read($, sync)).data
+  const local = await readLocal($, data, new Set(issues.map(issue => issueUrl(base, issue.id))))
+  if (typeof local === 'string') return local || t.listFailed
 
   const fallback = order[0] ?? ''
   const remote = issues.map(issue => toRemoteItem(base, issue, statusMap, priorityMap, fallback))
@@ -379,25 +499,8 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
   let fromRemote = 0
   let toRemote = 0
   for (const action of planned.actions) {
-    if (action.kind === 'create-local') {
-      const run = await backlog($, args.createFrom(action.fields, action.url))
-      const id = run.ok ? createdId(run.stdout) : undefined
-      if (id) {
-        links[action.key] = { taskId: id, base: action.fields }
-        fromRemote++
-      } else {
-        delete links[action.key]
-        warnings.push(t.localFailed(`#${action.key}`, errorLine(run.ok ? '' : run.stderr, '?')))
-      }
-    } else if (action.kind === 'update-local') {
-      const run = await backlog($, args.editFields(action.taskId, action.change))
-      if (run.ok) fromRemote++
-      else {
-        // Tried again next time: the old base still differs.
-        const old = data.links[action.key]
-        if (old) links[action.key] = old
-        warnings.push(t.localFailed(action.taskId, errorLine(run.stderr, '?')))
-      }
+    if (action.kind === 'create-local' || action.kind === 'update-local') {
+      if (await applyLocal($, action, links, data, warnings, t)) fromRemote++
     } else if (action.kind === 'update-remote') {
       const body = issueBody(action.change, maps, lists, meta[action.key])
       const old = data.links[action.key]?.base
@@ -481,7 +584,8 @@ async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote'
   const view = await read($, sync)
   const settings = view.settings
   const base = settings ? normalizeUrl(settings.url) : undefined
-  if (!settings || !base) return
+  const isCsv = settings?.provider === 'csv'
+  if (!settings || (!base && !isCsv)) return
   const value = side === 'remote' ? conflict.remote : conflict.local
   if (side === 'remote') {
     const run = await backlog($, args.editFields(conflict.taskId, { [conflict.field]: value ?? '' }))
@@ -489,7 +593,7 @@ async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote'
       await update($, notice, () => t.localFailed(conflict.taskId, errorLine(run.stderr, '?')))
       return
     }
-  } else {
+  } else if (!isCsv && base) {
     const body = issueBody(
       { [conflict.field]: value ?? '' },
       { status: settings.statusMap, priority: settings.priorityMap },
@@ -508,18 +612,26 @@ async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote'
       return
     }
   }
+  // The file is read only: either way its value is the one agreed, so keeping
+  // Backlog.md's counts as a local change, kept until the file changes again.
+  const agreed = isCsv ? conflict.remote : value
   await saveSync($, now => {
     const link = now.data.links[conflict.key]
-    const links = link ? { ...now.data.links, [conflict.key]: { ...link, base: { ...link.base, [conflict.field]: value ?? '' } } } : now.data.links
+    const links = link ? { ...now.data.links, [conflict.key]: { ...link, base: { ...link.base, [conflict.field]: agreed ?? '' } } } : now.data.links
     const conflicts = now.data.conflicts.filter(one => !(one.key === conflict.key && one.field === conflict.field))
     return { settings: now.settings, data: { ...now.data, links, conflicts } }
   })
   await update($, notice, () => null)
 }
 
-/** Picks the tracker; Redmine starts read only, every 5 minutes, the tasks there now kept out. */
+/**
+ * Picks the tracker. Redmine starts read only, every 5 minutes, the tasks
+ * there now kept out; a CSV is read only, read with the button. Switching
+ * between them keeps the links (both name issues by number) but not the
+ * mappings (Redmine's go by id, a CSV's by name).
+ */
 async function setTracker($: Engine, value: string) {
-  if (value !== 'redmine') {
+  if (value !== 'redmine' && value !== 'csv') {
     stopSyncTimer()
     const t = await text($)
     await saveSync($, now => ({ settings: null, data: now.data }))
@@ -527,26 +639,34 @@ async function setTracker($: Engine, value: string) {
     return
   }
   const existing = (await read($, tasks)).map(task => task.id)
-  await saveSync($, now => ({
-    settings: now.settings ?? {
-      provider: 'redmine',
-      url: '',
-      project: '',
-      mode: 'read',
-      onlyMine: false,
-      view: 'all',
-      intervalMin: 5,
-      statusMap: {},
-      priorityMap: {},
-      excluded: existing,
-    },
-    data: now.data,
-  }))
+  await saveSync($, now => {
+    if (now.settings?.provider === value) return { settings: now.settings, data: now.data }
+    const isCsv = value === 'csv'
+    return {
+      settings: {
+        provider: value,
+        url: now.settings?.url ?? '',
+        project: now.settings?.project ?? '',
+        file: now.settings?.file ?? '',
+        mode: 'read',
+        onlyMine: false,
+        view: 'all',
+        intervalMin: isCsv ? 0 : 5,
+        statusMap: {},
+        priorityMap: {},
+        excluded: now.settings?.excluded ?? existing,
+      },
+      data: { ...now.data, meta: {}, me: undefined, statuses: [], priorities: [], warnings: [], lastError: undefined },
+    }
+  })
+  // A CSV has no timer; Redmine's starts with the pane's watch, or now if it runs.
+  if (active) await startSyncTimer($)
 }
 
-async function setSyncSettings($: Engine, change: Partial<RedmineSettings>) {
+async function setSyncSettings($: Engine, change: Partial<SyncSettings>) {
   const t = await text($)
-  if (change.url !== undefined && !normalizeUrl(change.url)) {
+  const isCsv = (await read($, sync)).settings?.provider === 'csv'
+  if (change.url !== undefined && !normalizeUrl(change.url) && !(isCsv && change.url.trim() === '')) {
     await update($, notice, () => t.badUrl)
     return
   }
@@ -615,7 +735,8 @@ async function receive($: Engine, list: TaskSummary[]) {
   await update($, tasks, () => list)
   await update($, phase, () => ({ kind: 'ready' }) as Phase)
   // The first list of this watch: sync once now, then on the timer.
-  if (!isSyncArmed && (await read($, sync)).settings) {
+  const kept = (await read($, sync)).settings
+  if (!isSyncArmed && kept && kept.provider !== 'csv') {
     isSyncArmed = true
     startSync($)
     await startSyncTimer($)
@@ -1216,6 +1337,9 @@ export const register: Register = (on, options) => {
       const data = synced.data
       const levels = await read($, priorities)
       const close = () => update($, isManagingSync, () => false)
+      const isCsv = settings?.provider === 'csv'
+      const trackerName = (provider: string | undefined) =>
+        provider === 'csv' ? t.trackerCsv : provider === 'redmine' ? t.trackerRedmine : t.noTracker
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" gap={1}>
@@ -1227,21 +1351,42 @@ export const register: Register = (on, options) => {
             <Select
               key="sync-tracker"
               label={t.tracker}
-              value={settings ? 'redmine' : 'none'}
+              value={settings?.provider ?? 'none'}
               options={[
                 { value: 'none', label: t.noTracker },
-                { value: 'redmine', label: 'Redmine' },
+                { value: 'redmine', label: t.trackerRedmine },
+                { value: 'csv', label: t.trackerCsv },
               ]}
               onSelect={value => setTracker($, value)}
             />
           ) : (
             <Text>
-              {t.tracker}: {settings ? 'Redmine' : t.noTracker}
+              {t.tracker}: {trackerName(settings?.provider)}
             </Text>
           )}
           {settings ? (
             <Box flexDirection="column" gap={1}>
-              {Input && Select ? (
+              {Input && isCsv ? (
+                <Box flexDirection="column">
+                  <Input
+                    key="sync-file"
+                    label={t.csvFile}
+                    placeholder={t.csvPlaceholder}
+                    value={settings.file}
+                    submitLabel={t.save}
+                    onSubmit={value => setSyncSettings($, { file: value.trim() })}
+                  />
+                  <Input
+                    key="sync-url"
+                    label={t.csvUrl}
+                    placeholder={t.urlPlaceholder}
+                    value={settings.url}
+                    submitLabel={t.save}
+                    onSubmit={value => setSyncSettings($, { url: value })}
+                  />
+                </Box>
+              ) : null}
+              {Input && Select && !isCsv ? (
                 <Box flexDirection="column">
                   <Input
                     key="sync-url"
@@ -1291,13 +1436,23 @@ export const register: Register = (on, options) => {
                   />
                 </Box>
               ) : null}
-              <Text dimColor>
-                {settings.url || '—'} · {settings.project || '—'} · {settings.mode === 'both' ? t.bothShort : t.readOnlyShort}
-                {settings.onlyMine ? ` · ${t.mineShort}` : ''}
-              </Text>
-              <Text dimColor={!!redmineKey} color={redmineKey ? undefined : 'warning'}>
-                {redmineKey ? t.apiKeySet : t.apiKeyMissing}
-              </Text>
+              {isCsv ? (
+                <Text dimColor>
+                  {settings.file || '—'} · {t.readOnlyShort} · {t.manualOnly}
+                </Text>
+              ) : (
+                <Text dimColor>
+                  {settings.url || '—'} · {settings.project || '—'} · {settings.mode === 'both' ? t.bothShort : t.readOnlyShort}
+                  {settings.onlyMine ? ` · ${t.mineShort}` : ''}
+                </Text>
+              )}
+              {isCsv ? (
+                <Text dimColor>{t.csvHow}</Text>
+              ) : (
+                <Text dimColor={!!redmineKey} color={redmineKey ? undefined : 'warning'}>
+                  {redmineKey ? t.apiKeySet : t.apiKeyMissing}
+                </Text>
+              )}
               <Box flexDirection="row" flexWrap="wrap" gap={1}>
                 <Button
                   key="sync-now"
@@ -1321,13 +1476,13 @@ export const register: Register = (on, options) => {
                     <Box flexDirection="column">
                       <Text>{t.conflictLine(conflict.taskId, t.fieldNames[conflict.field] ?? conflict.field)}</Text>
                       <Text dimColor>
-                        {t.inRedmine}: {conflict.remote?.trim() ? conflict.remote : t.empty}
+                        {isCsv ? t.inFile : t.inRedmine}: {conflict.remote?.trim() ? conflict.remote : t.empty}
                       </Text>
                       <Text dimColor>
                         {t.inBacklog}: {conflict.local?.trim() ? conflict.local : t.empty}
                       </Text>
                       <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                        <Button key={`conflict-remote-${i}`} label={t.useRemote} onPress={() => resolveConflict($, conflict, 'remote')} />
+                        <Button key={`conflict-remote-${i}`} label={isCsv ? t.useFile : t.useRemote} onPress={() => resolveConflict($, conflict, 'remote')} />
                         <Button key={`conflict-local-${i}`} label={t.useLocal} onPress={() => resolveConflict($, conflict, 'local')} />
                       </Box>
                     </Box>
@@ -1376,7 +1531,7 @@ export const register: Register = (on, options) => {
                 </Box>
               ) : null}
               {data.statuses.length === 0 ? <Text dimColor>{t.mappingLater}</Text> : null}
-              <Text dimColor>{t.syncNote}</Text>
+              <Text dimColor>{isCsv ? t.csvNote : t.syncNote}</Text>
             </Box>
           ) : null}
         </Box>
@@ -1726,6 +1881,7 @@ export const register: Register = (on, options) => {
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
             <Text dimColor color={synced.data.conflicts.length > 0 || synced.data.lastError ? 'warning' : undefined}>
               {t.syncLine(
+                synced.settings.provider === 'csv' ? 'CSV' : 'Redmine',
                 synced.settings.mode === 'both' ? t.bothShort : t.readOnlyShort,
                 syncTime,
                 synced.data.conflicts.length,

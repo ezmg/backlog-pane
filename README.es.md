@@ -64,6 +64,9 @@ del prompt. El prompt **nunca se envía por ti**.
   Redmine, en solo lectura o bidireccional. Las peticiones se convierten en tareas y se
   mantienen al día campo a campo, con un botón y cada pocos minutos. Ver
   [Integración (Redmine)](#integración-redmine).
+- **Excel / CSV, sin clave de API.** Exporta las peticiones de Redmine como CSV y el panel
+  las lee como tareas, en solo lectura, al pulsar **Sincronizar ahora**. Ver
+  [Integración (Excel / CSV)](#integración-excel--csv).
 - **Inglés y español.** El panel, el comando y los dos borradores. Ver la opción
   `language`.
 - **Solo la CLI, con una excepción.** Cada cambio en una tarea ejecuta un comando `backlog`
@@ -142,8 +145,9 @@ marcado ninguna casilla **Cerrado**.
 
 ## Integración (Redmine)
 
-Cada proyecto puede enlazarse con **un** gestor de tareas externo. Redmine es el primero;
-Jira y Excel vienen después. Las tareas se copian en Backlog.md con la CLI `backlog`, así
+Cada proyecto puede enlazarse con **un** gestor de tareas externo: la API de Redmine, o un
+CSV exportado de Redmine (ver [Integración (Excel / CSV)](#integración-excel--csv)). Jira
+viene después. Las tareas se copian en Backlog.md con la CLI `backlog`, así
 que el tablero, Claude y las propias herramientas de Backlog.md las ven como tareas
 normales.
 
@@ -245,6 +249,46 @@ Para cerrar esa puerta:
    puede cambiar nada.
 3. **Regenérala** en Redmine (**Mi cuenta → Clave de acceso de la API**) si crees que se ha
    filtrado. La antigua deja de valer al momento.
+
+## Integración (Excel / CSV)
+
+Para cuando no puedes conseguir una clave de API de Redmine pero sí exportar las
+peticiones. Redmine las exporta como CSV, que se abre con Excel; el panel lee ese
+archivo. Es **solo lectura**: nunca se escribe nada en el archivo ni en Redmine.
+
+**Configurarlo:**
+
+1. En Redmine, abre **Peticiones** y fíltralas como quieras (por ejemplo
+   *Asignado a: «yo»*, para quedarte solo con las tuyas). Abajo, en *También disponible
+   en*, pulsa **CSV**, marca **Descripción** y **Exportar**.
+2. Guarda el archivo, por ejemplo `C:\Users\tú\Downloads\issues.csv`.
+3. En el panel, pulsa **Integración…**, elige **Excel / CSV (exportación de Redmine)** como
+   gestor y escribe la ruta del archivo (absoluta, relativa a la carpeta de la sesión, o
+   empezando por `~`).
+4. Si quieres, escribe la URL de tu Redmine. Así las referencias de las tareas guardan la
+   URL de cada petición (`…/issues/12`) en lugar de `#12`, y si algún día consigues una
+   clave de API, **Redmine (API)** reconoce esas mismas tareas en vez de copiarlas otra vez.
+5. Pulsa **Sincronizar ahora**.
+
+**Cada vez** que quieras datos nuevos, vuelve a exportar sobre el mismo archivo y pulsa
+**Sincronizar ahora**. El archivo solo se lee entonces: no al abrir el panel ni cada
+cierto tiempo.
+
+**Qué lee:** las columnas `#`, *Asunto*, *Estado*, *Prioridad* y *Descripción*, por sus
+cabeceras en español, inglés y los otros idiomas principales de Redmine. Solo hacen falta
+`#` y *Asunto*; un campo sin columna no se toca, y el panel lo avisa. El separador (`,`,
+`;` o tabulador) y la codificación (UTF-8, o Windows-1252 como Redmine escribe en español
+por defecto) se detectan solos.
+
+**Estados y prioridades** se asignan por nombre, igual que con la API (un estado con fecha
+en la columna *Cerrada*, o con un nombre como *Cerrada* o *Rechazada*, va al estado final),
+y puedes cambiar cada uno en **Integración…**.
+
+**Tus cambios en Backlog.md** se quedan: un campo que cambiaste en Backlog.md no lo pisa el
+siguiente archivo. Si un campo cambió en el archivo y en Backlog.md, el panel pregunta, con
+**Usar el del archivo** y **Usar el de Backlog.md**. Quedarte con el de Backlog.md vale hasta
+que el archivo vuelva a cambiar ese campo. No se borra nada: una petición que ya no está en
+el archivo deja su tarea como estaba.
 
 ## Editar textos largos
 
@@ -446,6 +490,7 @@ Linux. Tres cosas a tener en cuenta:
 | Redmine: recibir un cambio | `backlog task edit <id> -t … -s … --priority … -d …` (solo los campos que cambiaron) |
 | Redmine: quién eres | `GET /users/current.json?include=groups`, para la vista y para asignar las peticiones nuevas |
 | Redmine: enviar un cambio (bidireccional) | `PUT /issues/<n>.json` con los campos que cambiaron |
+| Excel / CSV: leer el archivo | `$.fs.read` de los bytes del archivo (4 MiB como mucho), y luego los mismos `task create` / `task edit` que con Redmine |
 | Redmine: enviar una tarea nueva (bidireccional) | `POST /issues.json` (con solo mías, asignada a ti), y luego `backlog task edit <id> --add-ref <URL de la petición>` |
 
 Los comandos de edición se comprobaron con Backlog.md 1.55.3. Al reescribir la lista de
@@ -482,7 +527,11 @@ Tras 5 fallos seguidos, el panel muestra el error y un botón **Reintentar**.
   descripciones pasan tal cual, sin convertir entre el Textile (o Markdown) de Redmine y el
   Markdown de Backlog.md. Un flujo de trabajo de Redmine puede rechazar un cambio de
   estado; el panel muestra el motivo de Redmine y lo reintenta en la siguiente
-  sincronización. Solo sincroniza con el panel abierto. Jira y Excel aún no están.
+  sincronización. Solo sincroniza con el panel abierto. Jira aún no está.
+- **Excel / CSV:** un CSV, no un archivo `.xlsx` (Redmine exporta las peticiones como CSV
+  salvo que un plugin añada Excel). Es solo lectura y solo se lee con el botón, y no se
+  puede leer un archivo de más de 4 MiB. Cambiar del gestor CSV al de la API, o al revés,
+  conserva los enlaces pero no la correspondencia de estados y prioridades.
 - **Todavía no:** aprobación del plan, sincronización automática cuando Claude termina,
   hitos y la definición de terminado. No se muestran subtareas, dependencias, etiquetas ni
   responsables.
@@ -510,6 +559,7 @@ hooks/board.tsx                   el módulo de superficie Client del tablero (t
 hooks/cli.ts                      funciones puras: comandos, lector del flujo JSON, agrupación, colores, editor
 hooks/sync.ts                     núcleo puro de la sincronización: fusión a tres bandas por campo, el plan de cada sincronización
 hooks/redmine.ts                  adaptador puro de Redmine: URLs, lectura, correspondencias por defecto, cuerpos de las peticiones
+hooks/csv.ts                      adaptador puro de CSV: codificaciones, lectura, las columnas de la exportación de Redmine
 hooks/i18n.ts                     textos en inglés y español, detección del idioma
 types/index.d.ts                  el contrato de $.state, las props del tablero, las formas de Backlog.md
 tests/                            suites de claude plugin test (fixtures.ts es el mundo simulado, con una configuración falsa;
@@ -567,6 +617,10 @@ Cubren:
 - la sincronización con Redmine: la fusión, solo lectura y bidireccional, solo mías (al sincronizar y al ver), conflictos,
   correspondencias, escrituras rechazadas, el temporizador, una clave que falta o es
   incorrecta, un proyecto que no existe y un servidor inalcanzable;
+- el gestor CSV: codificaciones, separadores y campos entre comillas, las columnas de la
+  exportación en español e inglés, una exportación nueva, un cambio local, un choque
+  resuelto de cada lado, la adopción por URL, columnas que faltan, un archivo que no
+  existe y un archivo que no es una exportación;
 - los estados de CLI ausente, proyecto sin inicializar, vigilancia que falla y sin
   interfaz.
 

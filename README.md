@@ -60,6 +60,9 @@ for you**.
 - **Redmine sync.** **Integration…** links the project to a Redmine project, read only
   or both ways. Issues become tasks and stay in step field by field, with a button and
   every few minutes. See [Integration (Redmine)](#integration-redmine).
+- **Excel / CSV, with no API key.** Export the issues from Redmine as CSV and the pane
+  reads them into tasks, read only, when you press **Sync now**. See
+  [Integration (Excel / CSV)](#integration-excel--csv).
 - **English and Spanish.** The pane, the command and both drafts. See the `language`
   option.
 - **CLI only, with one exception.** Every change to a task runs a `backlog` command
@@ -131,8 +134,9 @@ them, and a project moved to another folder starts afresh. The `closedStatuses` 
 
 ## Integration (Redmine)
 
-Each project can be linked to **one** outside tracker. Redmine is the first; Jira and Excel
-come next. The tasks are copied into Backlog.md with the `backlog` CLI, so the board,
+Each project can be linked to **one** outside tracker: Redmine's API, or a CSV that
+Redmine exported (see [Integration (Excel / CSV)](#integration-excel--csv)). Jira comes
+next. The tasks are copied into Backlog.md with the `backlog` CLI, so the board,
 Claude and Backlog.md's own tools all see them as ordinary tasks.
 
 **Set it up:**
@@ -229,6 +233,45 @@ To close that door:
    issues if you sync read only, so a leaked key can change nothing.
 3. **Regenerate it** in Redmine (**My account → API access key**) if you think it leaked.
    The old one stops working at once.
+
+## Integration (Excel / CSV)
+
+For when you can't get a Redmine API key but can export the issues. Redmine exports them
+as CSV, which Excel opens; the pane reads that file. It is **read only**: nothing is ever
+written to the file or to Redmine.
+
+**Set it up:**
+
+1. In Redmine, open **Issues** and filter them as you like (for example
+   *Assignee: «me»*, to get only yours). At the bottom, under *Also available in*, click
+   **CSV**, tick **Description**, and **Export**.
+2. Save the file, say `C:\Users\you\Downloads\issues.csv`.
+3. In the pane, press **Integration…**, pick **Excel / CSV (Redmine export)** as the
+   tracker, and type the file's path (absolute, relative to the session's folder, or
+   starting with `~`).
+4. Optionally, type your Redmine's URL. The tasks' references then hold each issue's URL
+   (`…/issues/12`) instead of `#12`, and if you later get an API key, **Redmine (API)**
+   picks the same tasks up instead of copying them again.
+5. Press **Sync now**.
+
+**Each time** you want fresh data, export again over the same file and press **Sync now**.
+The file is read only then: not when the pane opens, and not on a timer.
+
+**What it reads:** the columns `#`, *Subject*, *Status*, *Priority* and *Description*, by
+their headers in English, Spanish and Redmine's other main languages. Only `#` and
+*Subject* are needed; a field with no column is left alone, and the pane says so. The
+separator (`,`, `;` or tab) and the encoding (UTF-8, or Windows-1252 as Redmine writes
+Spanish by default) are found by themselves.
+
+**Statuses and priorities** are mapped by name, the same way as with the API (a status
+with a date in the *Closed* column, or a name like *Cerrada* or *Rechazada*, goes to the
+final status), and you can change each one in **Integration…**.
+
+**Your changes in Backlog.md** stay there: a field you changed in Backlog.md is not
+overwritten by the next file. When a field changed both in the file and in Backlog.md,
+the pane asks, with **Use the file's** and **Use Backlog.md's**. Keeping Backlog.md's holds
+until the file changes that field again. Nothing is deleted: an issue that is no longer in
+the file leaves its task as it was.
 
 ## Editing long text
 
@@ -421,6 +464,7 @@ things to know:
 | Redmine: take a change | `backlog task edit <id> -t … -s … --priority … -d …` (only the fields that changed) |
 | Redmine: who you are | `GET /users/current.json?include=groups`, for the view and for assigning new issues |
 | Redmine: send a change (both ways) | `PUT /issues/<n>.json` with the fields that changed |
+| Excel / CSV: read the file | `$.fs.read` of the file's bytes (4 MiB at most), then the same `task create` / `task edit` as Redmine's |
 | Redmine: send a new task (both ways) | `POST /issues.json` (with only mine, assigned to you), then `backlog task edit <id> --add-ref <issue URL>` |
 
 The editing commands were checked against Backlog.md 1.55.3. Rewriting the criteria list
@@ -454,7 +498,11 @@ the pane shows the error and a **Retry** button.
   versions and custom fields are not synced. Descriptions go across as they are, with no
   conversion between Redmine's Textile (or Markdown) and Backlog.md's Markdown. A Redmine
   workflow can refuse a status change; the pane shows Redmine's reason and tries again on
-  the next sync. The sync runs only while the pane is open. Jira and Excel are not there yet.
+  the next sync. The sync runs only while the pane is open. Jira is not there yet.
+- **Excel / CSV:** a CSV, not an `.xlsx` file (Redmine exports issues as CSV unless a
+  plugin adds Excel). It is read only and read only with the button, and a file over
+  4 MiB can't be read. Choosing the CSV tracker in place of the API one, or back, keeps
+  the links but not the status and priority mappings.
 - **Not yet:** plan approval, automatic sync when Claude finishes, milestones and the
   definition of done. Subtasks, dependencies, labels and assignees are not shown.
 - The live list covers what `task list` returns, so drafts and archived tasks are not
@@ -481,6 +529,7 @@ hooks/board.tsx                   the board's Client surface module (terminal, d
 hooks/cli.ts                      pure helpers: commands, JSON stream reader, grouping, colours, editor
 hooks/sync.ts                     pure sync core: three-way merge per field, the plan of each sync
 hooks/redmine.ts                  pure Redmine adapter: URLs, parsing, default mappings, issue bodies
+hooks/csv.ts                      pure CSV adapter: encodings, parsing, Redmine's export columns
 hooks/i18n.ts                     English and Spanish strings, language detection
 types/index.d.ts                  the $.state contract, the board's props, Backlog.md shapes
 tests/                            claude plugin test suites (fixtures.ts is the fake world, with a fake config;
@@ -537,6 +586,9 @@ cover:
 - both drafts;
 - the Redmine sync: the merge, read only and both ways, only mine (synced and viewed), conflicts, mappings, refused
   writes, the timer, a missing or wrong key, a missing project and an unreachable server;
+- the CSV tracker: encodings, separators and quoted fields, the export's columns in
+  English and Spanish, a new export, a local change, a clash on each side, adoption by
+  URL, missing columns, a missing file and a file that is not an export;
 - the missing-CLI, uninitialized, failing-watch and headless states.
 
 They run on the terminal, desktop, VS Code and mobile surfaces where each applies, and give

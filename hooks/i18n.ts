@@ -135,6 +135,24 @@ const en = {
   integrationTitle: 'Integration',
   tracker: 'Tracker',
   noTracker: 'None',
+  trackerRedmine: 'Redmine (API)',
+  trackerCsv: 'Excel / CSV (Redmine export)',
+  csvFile: 'CSV file',
+  csvPlaceholder: 'C:\\Users\\you\\Downloads\\issues.csv',
+  csvUrl: 'Redmine URL (optional, to link the tasks)',
+  csvHow:
+    'In Redmine: Issues, filter them (for example Assignee: “me”), then CSV at the bottom, tick Description, and Export. Save it over the same file each time, then press Sync now.',
+  csvNote:
+    'The file’s issues are copied into Backlog.md as tasks and kept in step field by field: title, status, priority and description. Nothing is ever written to the file or to Redmine, and nothing is deleted. A field changed both in the file and in Backlog.md is a conflict you settle.',
+  badFile: 'Type the path of the CSV file Redmine exported.',
+  fileUnreadable: (path: string, why: string) => `Could not read ${path}: ${why}`,
+  csvColumns: (headers: string) =>
+    `This is not an issue export from Redmine: it has no “#” and “Subject” columns${headers ? ` (it has: ${headers})` : ''}.`,
+  csvMissing: (fields: string) => `The file has no column for: ${fields}. Those are left alone.`,
+  csvDone: (rows: number, changed: number, conflicts: number) =>
+    `CSV: ${rows} ${plural(rows, 'issue', 'issues')} read, ${changed} ${plural(changed, 'task', 'tasks')} created or updated, ${conflicts} ${plural(conflicts, 'conflict', 'conflicts')}.`,
+  inFile: 'The file',
+  useFile: 'Use the file’s',
   redmineUrl: 'Redmine URL',
   urlPlaceholder: 'https://redmine.example.com',
   redmineProject: 'Project identifier',
@@ -181,8 +199,8 @@ const en = {
   empty: '(empty)',
   syncDone: (n: { fromRemote: number; toRemote: number; conflicts: number }) =>
     `Redmine: ${n.fromRemote} from Redmine, ${n.toRemote} to Redmine, ${n.conflicts} ${plural(n.conflicts, 'conflict', 'conflicts')}.`,
-  syncLine: (mode: string, time: string | null, conflicts: number) =>
-    `Redmine · ${mode}${time ? ` · ${time}` : ''}${conflicts > 0 ? ` · ${conflicts} ${plural(conflicts, 'conflict', 'conflicts')}` : ''}`,
+  syncLine: (tracker: string, mode: string, time: string | null, conflicts: number) =>
+    `${tracker} · ${mode}${time ? ` · ${time}` : ''}${conflicts > 0 ? ` · ${conflicts} ${plural(conflicts, 'conflict', 'conflicts')}` : ''}`,
   readOnlyShort: 'read only',
   bothShort: 'both ways',
   badUrl: 'Type the server’s URL, starting with https:// (or http://).',
@@ -331,6 +349,24 @@ const es: Strings = {
   integrationTitle: 'Integración',
   tracker: 'Gestor',
   noTracker: 'Ninguno',
+  trackerRedmine: 'Redmine (API)',
+  trackerCsv: 'Excel / CSV (exportación de Redmine)',
+  csvFile: 'Archivo CSV',
+  csvPlaceholder: 'C:\\Users\\tú\\Downloads\\issues.csv',
+  csvUrl: 'URL de Redmine (opcional, para enlazar las tareas)',
+  csvHow:
+    'En Redmine: Peticiones, fíltralas (por ejemplo Asignado a: «yo»), luego CSV abajo, marca Descripción y Exportar. Guárdalo siempre sobre el mismo archivo y pulsa Sincronizar ahora.',
+  csvNote:
+    'Las peticiones del archivo se copian en Backlog.md como tareas y se mantienen al día campo a campo: título, estado, prioridad y descripción. Nunca se escribe nada en el archivo ni en Redmine, y nunca se borra nada. Un campo cambiado en el archivo y en Backlog.md es un conflicto que resuelves tú.',
+  badFile: 'Escribe la ruta del archivo CSV que exportó Redmine.',
+  fileUnreadable: (path, why) => `No se pudo leer ${path}: ${why}`,
+  csvColumns: headers =>
+    `Esto no es una exportación de peticiones de Redmine: no tiene las columnas «#» y «Asunto»${headers ? ` (tiene: ${headers})` : ''}.`,
+  csvMissing: fields => `El archivo no tiene columna para: ${fields}. Eso no se toca.`,
+  csvDone: (rows, changed, conflicts) =>
+    `CSV: ${rows} ${plural(rows, 'petición leída', 'peticiones leídas')}, ${changed} ${plural(changed, 'tarea creada o actualizada', 'tareas creadas o actualizadas')}, ${conflicts} ${plural(conflicts, 'conflicto', 'conflictos')}.`,
+  inFile: 'El archivo',
+  useFile: 'Usar el del archivo',
   redmineUrl: 'URL de Redmine',
   urlPlaceholder: 'https://redmine.ejemplo.com',
   redmineProject: 'Identificador del proyecto',
@@ -374,8 +410,8 @@ const es: Strings = {
   empty: '(vacío)',
   syncDone: n =>
     `Redmine: ${n.fromRemote} desde Redmine, ${n.toRemote} hacia Redmine, ${n.conflicts} ${plural(n.conflicts, 'conflicto', 'conflictos')}.`,
-  syncLine: (mode, time, conflicts) =>
-    `Redmine · ${mode}${time ? ` · ${time}` : ''}${conflicts > 0 ? ` · ${conflicts} ${plural(conflicts, 'conflicto', 'conflictos')}` : ''}`,
+  syncLine: (tracker, mode, time, conflicts) =>
+    `${tracker} · ${mode}${time ? ` · ${time}` : ''}${conflicts > 0 ? ` · ${conflicts} ${plural(conflicts, 'conflicto', 'conflictos')}` : ''}`,
   readOnlyShort: 'solo lectura',
   bothShort: 'bidireccional',
   badUrl: 'Escribe la URL del servidor, empezando por https:// (o http://).',
