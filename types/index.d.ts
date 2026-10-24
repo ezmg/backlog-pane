@@ -32,16 +32,37 @@ export type Phase =
   | { kind: 'not-initialized'; message: string }
   | { kind: 'failed'; message: string }
 
+/** One card of the board: a task as its surface module draws it. */
+export type BoardCard = { id: string; title: string; isHigh: boolean }
+
+/** One column of the board: a status, its theme colour and its cards. */
+export type BoardColumn = { status: string; color: string; total: number; cards: BoardCard[] }
+
+/** What the board's `Client` is handed: plain data, no closures. */
+export type BoardProps = {
+  columns: BoardColumn[]
+  /** The pane's body width, until the region has been laid out. */
+  width: number
+  hint: string
+}
+
+/** What the board's surface module posts to the hooks module. */
+export type BoardMessage = { type: 'move'; id: string; status: string } | { type: 'open'; id: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'backlog-pane': {
       phase: Phase
       tasks: TaskSummary[]
       statuses: string[]
+      priorities: string[]
       selectedId: string | null
       detail: TaskDetail | null
       isDoneOpen: boolean
       notice: string | null
+      editing: string | null
+      isCreating: boolean
+      isBoardFailed: boolean
     }
   }
 }

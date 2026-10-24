@@ -2,13 +2,13 @@
 // and the grouping the pane draws. Nothing here touches `$`, so the tests
 // can cover it directly.
 
+import type { ThemeKey } from 'claude-code'
+
 import type { Checklist, TaskDetail, TaskSummary } from '../types'
+import type { Strings } from './i18n'
 
 export const DEFAULT_STATUSES = ['To Do', 'In Progress', 'Done']
-
-/** The prompt "Work on this task" leaves in the prompt box. */
-export const workPrompt = (id: string) =>
-  `Work on ${id} only. Research the codebase and write an implementation plan in the task. Wait for my approval before coding.`
+export const DEFAULT_PRIORITIES = ['high', 'medium', 'low']
 
 export const args = {
   version: () => ['--version'],
@@ -18,6 +18,23 @@ export const args = {
   view: (id: string) => ['task', 'view', id, '--json'],
   setStatus: (id: string, status: string) => ['task', 'edit', id, '--status', status],
   create: (title: string) => ['task', 'create', title],
+  priorities: () => ['config', 'get', 'priorities'],
+  defaultEditor: () => ['config', 'get', 'defaultEditor'],
+  setDescription: (id: string, text: string) => ['task', 'edit', id, '-d', text],
+  setPlan: (id: string, text: string) => ['task', 'edit', id, '--plan', text],
+  setTitle: (id: string, title: string) => ['task', 'edit', id, '-t', title],
+  setPriority: (id: string, priority: string) => ['task', 'edit', id, '--priority', priority],
+  checkCriterion: (id: string, index: number) => ['task', 'edit', id, '--check-ac', String(index)],
+  uncheckCriterion: (id: string, index: number) => ['task', 'edit', id, '--uncheck-ac', String(index)],
+  addCriterion: (id: string, text: string) => ['task', 'edit', id, '--ac', text],
+  removeCriterion: (id: string, index: number) => ['task', 'edit', id, '--remove-ac', String(index)],
+  /** Replaces every criterion, in order; a text left unchanged keeps its tick. */
+  setCriteria: (id: string, texts: string[]) => [
+    'task',
+    'edit',
+    id,
+    ...texts.flatMap(text => ['--acceptance-criteria', text]),
+  ],
 }
 
 /**
@@ -48,6 +65,72 @@ export function candidates(env: {
   return found
 }
 
+/** Whether a version (`2.1.301`, `2.1.301-dev.…`) is at least `minimum`. */
+export function isAtLeast(version: string | undefined, minimum: string): boolean {
+  const parse = (text: string | undefined) => /^(\d+)\.(\d+)\.(\d+)/.exec(text?.trim() ?? '')?.slice(1).map(Number)
+  const have = parse(version)
+  const need = parse(minimum)
+  if (!have || !need) return false
+  for (let i = 0; i < 3; i++) {
+    const a = have[i] ?? 0
+    const b = need[i] ?? 0
+    if (a !== b) return a > b
+  }
+  return true
+}
+
+/**
+ * Splits an editor command as a shell would split its words, quotes kept
+ * together: `code --wait`, `"C:\Program Files\Editor\editor.exe" -w`.
+ */
+export function splitCommand(command: string): string[] {
+  const words: string[] = []
+  let word = ''
+  let quote: string | null = null
+  let isWord = false
+  for (const c of command.trim()) {
+    if (quote) {
+      if (c === quote) quote = null
+      else word += c
+    } else if (c === '"' || c === "'") {
+      quote = c
+      isWord = true
+    } else if (/\s/.test(c)) {
+      if (isWord) words.push(word)
+      word = ''
+      isWord = false
+    } else {
+      word += c
+      isWord = true
+    }
+  }
+  if (isWord) words.push(word)
+  return words
+}
+
+/**
+ * The editor to run, as an argument vector: Backlog.md's `defaultEditor`,
+ * else VISUAL, else EDITOR, else Notepad on Windows; undefined when none.
+ */
+export function pickEditor(env: { configured?: string; visual?: string; editor?: string; os?: string }): string[] | undefined {
+  for (const value of [env.configured, env.visual, env.editor]) {
+    const text = value?.trim() ?? ''
+    if (text === '' || text === 'undefined' || text === 'null') continue
+    const argv = splitCommand(text)
+    if (argv.length > 0) return argv
+  }
+  return env.os === 'Windows_NT' ? ['notepad'] : undefined
+}
+
+/** Where the text goes while the editor has it: the temp folder. */
+export function editorFile(env: { tmpdir?: string; temp?: string; tmp?: string; userProfile?: string; os?: string }, id: string, field: string): string {
+  const isWindows = env.os === 'Windows_NT'
+  const fallback = isWindows ? (env.userProfile ? `${env.userProfile}\\AppData\\Local\\Temp` : 'C:\\Windows\\Temp') : '/tmp'
+  const folder = (env.tmpdir || env.temp || env.tmp || fallback).replace(/[\\/]+$/, '')
+  const name = `backlog-pane-${id.replace(/[^\w.-]/g, '_')}-${field}.md`
+  return `${folder}${isWindows ? '\\' : '/'}${name}`
+}
+
 /** Why a backlog command failed, from its stderr. */
 export function classify(stderr: string): 'not-initialized' | 'failed' {
   return /no backlog(\.md)? project found|backlog init/i.test(stderr) ? 'not-initialized' : 'failed'
@@ -62,15 +145,35 @@ export function errorLine(stderr: string, fallback: string): string {
   return line ?? fallback
 }
 
-/** `backlog config get statuses` prints `To Do, In Progress, Done`. */
-export function parseStatuses(stdout: string): string[] {
+/**
+ * A list `backlog config get` prints: `To Do, In Progress, Done`, or with
+ * brackets and quotes around it; `fallback` when it prints none.
+ */
+export function parseList(stdout: string, fallback: string[]): string[] {
   const list = stdout
     .trim()
     .replace(/^\[|\]$/g, '')
     .split(',')
-    .map(one => one.trim())
-    .filter(one => one !== '')
-  return list.length > 0 ? list : DEFAULT_STATUSES
+    .map(one => one.trim().replace(/^["']|["']$/g, '').trim())
+    .filter(one => one !== '' && one !== 'undefined' && one !== 'null')
+  return list.length > 0 ? list : fallback
+}
+
+/** `backlog config get statuses` prints `To Do, In Progress, Done`. */
+export const parseStatuses = (stdout: string) => parseList(stdout, DEFAULT_STATUSES)
+
+/** `backlog config get priorities`; High, Medium, Low when it prints none. */
+export const parsePriorities = (stdout: string) => parseList(stdout, DEFAULT_PRIORITIES)
+
+/**
+ * The criteria's texts with the one at `index` (1-based, as the CLI counts)
+ * replaced, for `args.setCriteria`; undefined when nothing would change.
+ */
+export function rewriteCriteria(criteria: Checklist[], index: number, text: string): string[] | undefined {
+  const next = text.trim()
+  const at = criteria.findIndex(item => item.index === index)
+  if (at === -1 || next === '' || criteria[at]?.text === next) return undefined
+  return criteria.map((item, i) => (i === at ? next : item.text))
 }
 
 /** The id `backlog task create` printed (`Created task TASK-3`). */
@@ -143,7 +246,7 @@ function toSummary(raw: Record<string, unknown>): TaskSummary {
   }
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /** The tasks of a `task-list` document, or undefined for any other. */
@@ -180,6 +283,7 @@ export type Group = {
   tasks: TaskSummary[]
   total: number
   isFinal: boolean
+  color: ThemeKey
 }
 
 const recency = (task: TaskSummary) => task.updatedAt ?? task.createdAt ?? ''
@@ -194,6 +298,7 @@ export function groupTasks(tasks: TaskSummary[], statuses: string[], doneLimit: 
   const final = order[order.length - 1]
   const names = [...order]
   for (const task of tasks) if (!names.includes(task.status)) names.push(task.status)
+  const colors = statusColors(names, final ?? '')
   return names.map(status => {
     let list = tasks.filter(task => task.status === status)
     const total = list.length
@@ -201,19 +306,50 @@ export function groupTasks(tasks: TaskSummary[], statuses: string[], doneLimit: 
     if (isFinal) {
       list = [...list].sort((a, b) => recency(b).localeCompare(recency(a))).slice(0, Math.max(0, doneLimit))
     }
-    return { status, tasks: list, total, isFinal }
+    return { status, tasks: list, total, isFinal, color: colors.get(status) ?? 'text' }
   })
 }
 
+const ROTATION: ThemeKey[] = ['permission', 'planMode', 'ide', 'merged']
+const IN_PROGRESS = /in[ -]?progress|en (curso|progreso)|doing|wip/i
+
+/**
+ * Each status's colour, by theme key so it follows the person's light or
+ * dark theme: the first status `suggestion`, one named like "In Progress"
+ * `warning`, the final one `success`, the others in turn from ROTATION.
+ * `names` is every status shown, in order; `final` the configured last.
+ */
+export function statusColors(names: string[], final: string): Map<string, ThemeKey> {
+  const colors = new Map<string, ThemeKey>()
+  let turn = 0
+  names.forEach((name, i) => {
+    if (name === final) colors.set(name, 'success')
+    else if (IN_PROGRESS.test(name)) colors.set(name, 'warning')
+    else if (i === 0) colors.set(name, 'suggestion')
+    else colors.set(name, ROTATION[turn++ % ROTATION.length] ?? 'permission')
+  })
+  return colors
+}
+
+/** The statuses before and after `status` in `order`, where there are any. */
+export function neighbours(order: string[], status: string): { previous?: string; next?: string } {
+  const i = order.indexOf(status)
+  if (i === -1) return {}
+  return { previous: order[i - 1], next: order[i + 1] }
+}
+
+/** Whether a task's priority is high, which the pane marks with "!". */
+export const isHighPriority = (priority: string | null | undefined) => priority?.trim().toLowerCase() === 'high'
+
 /** The board as plain text, for surfaces that draw no pane. */
-export function summarize(tasks: TaskSummary[], statuses: string[]): string {
-  if (tasks.length === 0) return 'Backlog: no tasks yet. Create one with `backlog task create "Title"`.'
-  const lines = [`Backlog: ${tasks.length} task${tasks.length === 1 ? '' : 's'}`]
+export function summarize(tasks: TaskSummary[], statuses: string[], t: Strings): string {
+  if (tasks.length === 0) return t.summaryEmpty
+  const lines = [t.summaryCount(tasks.length)]
   for (const group of groupTasks(tasks, statuses, 5)) {
     if (group.total === 0) continue
     lines.push('', `${group.status} (${group.total})`)
     for (const task of group.tasks) lines.push(`  ${task.id}  ${task.title}`)
-    if (group.total > group.tasks.length) lines.push(`  … ${group.total - group.tasks.length} more`)
+    if (group.total > group.tasks.length) lines.push(`  ${t.summaryMore(group.total - group.tasks.length)}`)
   }
   return lines.join('\n')
 }
