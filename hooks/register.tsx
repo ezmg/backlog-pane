@@ -47,6 +47,8 @@ import {
   issueUrl,
   normalizeUrl,
   readCreated,
+  readCurrentUser,
+  issueIdOf,
   readError,
   readIssues,
   readPriorities,
@@ -314,7 +316,7 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
   const remotePriorities = (priorityAnswer.ok ? readPriorities(priorityAnswer.text) : undefined) ?? []
   const issues = []
   for (let offset = 0; ; offset += PAGE) {
-    const answer = await redmineCall($, 'GET', redmineUrls.issues(base, project, offset))
+    const answer = await redmineCall($, 'GET', redmineUrls.issues(base, project, offset, settings.onlyMine))
     const page = answer.ok ? readIssues(answer.text) : undefined
     if (!page) return answer.ok ? t.unexpected('issues') : problemOf(t, answer, project)
     issues.push(...page.issues)
@@ -357,7 +359,16 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
     mode: settings.mode,
     excluded: settings.excluded,
     createsRemote: true,
+    ownsRef: ref => issueIdOf(base, ref) !== undefined,
   })
+
+  // Only mine: a task sent to Redmine is assigned to the key's owner, or it
+  // would fall out of the list on the next sync.
+  let me: number | undefined
+  if (settings.onlyMine && planned.actions.some(action => action.kind === 'create-remote')) {
+    const answer = await redmineCall($, 'GET', redmineUrls.currentUser(base))
+    me = answer.ok ? readCurrentUser(answer.text) : undefined
+  }
 
   const meta = Object.fromEntries(issues.map(issue => [String(issue.id), { statusId: issue.statusId, priorityId: issue.priorityId }]))
   const maps = { status: statusMap, priority: priorityMap }
@@ -403,11 +414,17 @@ async function syncOnce($: Engine, settings: RedmineSettings, base: string, t: S
         warnings.push(t.refused(action.key, answer.status === 0 ? errorLine(answer.text, '?') : readError(answer.status, answer.text)))
       }
     } else {
+      if (settings.onlyMine && me === undefined) {
+        warnings.push(t.noMe(action.taskId))
+        continue
+      }
       const run = await backlog($, args.view(action.taskId))
       const detail = run.ok ? readTaskView(safeParse(run.stdout)) : undefined
       const fields = { ...action.fields, description: detail?.description ?? '' }
       const body = issueBody(fields, maps, lists)
-      const answer = await redmineCall($, 'POST', redmineUrls.create(base), { issue: { project_id: project, ...body.issue } })
+      const answer = await redmineCall($, 'POST', redmineUrls.create(base), {
+        issue: { project_id: project, ...body.issue, ...(me === undefined ? {} : { assigned_to_id: me }) },
+      })
       const id = answer.ok ? readCreated(answer.text) : undefined
       if (id === undefined) {
         warnings.push(t.refused(action.taskId, answer.status === 0 ? errorLine(answer.text, '?') : readError(answer.status, answer.text)))
@@ -514,6 +531,7 @@ async function setTracker($: Engine, value: string) {
       url: '',
       project: '',
       mode: 'read',
+      onlyMine: false,
       intervalMin: 5,
       statusMap: {},
       priorityMap: {},
@@ -1249,6 +1267,16 @@ export const register: Register = (on, options) => {
                     onSelect={value => setSyncSettings($, { mode: value === 'both' ? 'both' : 'read' })}
                   />
                   <Select
+                    key="sync-scope"
+                    label={t.scope}
+                    value={settings.onlyMine ? 'mine' : 'all'}
+                    options={[
+                      { value: 'all', label: t.scopeAll },
+                      { value: 'mine', label: t.scopeMine },
+                    ]}
+                    onSelect={value => setSyncSettings($, { onlyMine: value === 'mine' })}
+                  />
+                  <Select
                     key="sync-interval"
                     label={t.every}
                     value={String(settings.intervalMin)}
@@ -1262,6 +1290,7 @@ export const register: Register = (on, options) => {
               ) : null}
               <Text dimColor>
                 {settings.url || '—'} · {settings.project || '—'} · {settings.mode === 'both' ? t.bothShort : t.readOnlyShort}
+                {settings.onlyMine ? ` · ${t.mineShort}` : ''}
               </Text>
               <Text dimColor={!!redmineKey} color={redmineKey ? undefined : 'warning'}>
                 {redmineKey ? t.apiKeySet : t.apiKeyMissing}

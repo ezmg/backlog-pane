@@ -142,6 +142,10 @@ const en = {
   mode: 'Mode',
   modeRead: 'Read only (Redmine → Backlog.md)',
   modeBoth: 'Both ways',
+  scope: 'Issues',
+  scopeAll: 'All of the project',
+  scopeMine: 'Only those assigned to me',
+  mineShort: 'only mine',
   every: 'Sync',
   manualOnly: 'Only with the button',
   everyMinutes: (n: number) => `Every ${n} min`,
@@ -188,6 +192,7 @@ const en = {
   statusNotSent: (task: string, status: string) => `${task}: no Redmine status maps to “${status}”, so its status was not sent.`,
   priorityNotSent: (task: string, priority: string) =>
     `${task}: no Redmine priority maps to “${priority}”, so its priority was not sent.`,
+  noMe: (task: string) => `${task} was not sent: Redmine did not say who owns the API key, to assign it to.`,
   refused: (issue: string, why: string) => `Redmine refused the change to #${issue}: ${why}`,
   localFailed: (task: string, why: string) => `${task} could not be updated: ${why}`,
   syncNote:
@@ -330,6 +335,10 @@ const es: Strings = {
   mode: 'Modo',
   modeRead: 'Solo lectura (Redmine → Backlog.md)',
   modeBoth: 'Bidireccional',
+  scope: 'Peticiones',
+  scopeAll: 'Todas las del proyecto',
+  scopeMine: 'Solo las asignadas a mí',
+  mineShort: 'solo mías',
   every: 'Sincronizar',
   manualOnly: 'Solo con el botón',
   everyMinutes: n => `Cada ${n} min`,
@@ -373,6 +382,7 @@ const es: Strings = {
   statusNotSent: (task, status) => `${task}: ningún estado de Redmine corresponde a «${status}», así que su estado no se envió.`,
   priorityNotSent: (task, priority) =>
     `${task}: ninguna prioridad de Redmine corresponde a «${priority}», así que su prioridad no se envió.`,
+  noMe: task => `${task} no se envió: Redmine no dijo de quién es la clave de API, para asignársela.`,
   refused: (issue, why) => `Redmine rechazó el cambio en #${issue}: ${why}`,
   localFailed: (task, why) => `No se pudo actualizar ${task}: ${why}`,
   syncNote:

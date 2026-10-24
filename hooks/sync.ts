@@ -82,6 +82,8 @@ export function plan(input: {
   excluded: readonly string[]
   /** Whether new Backlog.md tasks are sent to the tracker (bidirectional only). */
   createsRemote: boolean
+  /** Whether a reference names an item of this tracker, listed this time or not. */
+  ownsRef?: (ref: string) => boolean
 }): Plan {
   const actions: Action[] = []
   const links: Record<string, Link> = {}
@@ -151,7 +153,7 @@ export function plan(input: {
     for (const task of input.local) {
       if (linkedTasks.has(task.id) || input.excluded.includes(task.id)) continue
       // A task that already points at an issue of this tracker is not a new one.
-      if (task.references.some(ref => remoteUrls.has(ref))) continue
+      if (task.references.some(ref => remoteUrls.has(ref) || input.ownsRef?.(ref))) continue
       actions.push({
         kind: 'create-remote',
         taskId: task.id,
@@ -181,6 +183,7 @@ export function readSyncStore(value: unknown): { settings: RedmineSettings | nul
           url: typeof s.url === 'string' ? s.url : '',
           project: typeof s.project === 'string' ? s.project : '',
           mode: s.mode === 'both' ? 'both' : 'read',
+          onlyMine: s.onlyMine === true,
           intervalMin: typeof s.intervalMin === 'number' && s.intervalMin >= 0 ? s.intervalMin : 5,
           statusMap: strings(s.statusMap) as Record<string, string>,
           priorityMap: strings(s.priorityMap) as Record<string, string>,

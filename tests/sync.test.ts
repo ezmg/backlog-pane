@@ -7,6 +7,7 @@ import {
   issueIdOf,
   normalizeUrl,
   readCreated,
+  readCurrentUser,
   readError,
   readIssues,
   readPriorities,
@@ -131,6 +132,9 @@ describe('planning a sync', () => {
   test('new tasks go to the tracker, but not excluded ones, nor in read only', async () => {
     const input = { ...BASE, remote: [], local: [local('BL-1'), local('BL-2')], links: {}, excluded: ['BL-1'] }
     expect(plan(input).actions).toEqual([{ kind: 'create-remote', taskId: 'BL-2', fields: fields() }])
+    // A task that names an issue of the tracker not listed this time (only mine) is not new.
+    const named = { ...input, excluded: [], local: [local('BL-3', {}, ['https://r.test/issues/9'])] }
+    expect(plan({ ...named, ownsRef: ref => ref.startsWith('https://r.test/issues/') }).actions).toEqual([])
     expect(plan({ ...input, mode: 'read' }).actions).toEqual([])
     expect(plan({ ...input, createsRemote: false }).actions).toEqual([])
   })
@@ -181,6 +185,11 @@ describe('Redmine', () => {
     expect(urls.issues('https://r.test', 'my app', 100)).toBe(
       'https://r.test/issues.json?project_id=my%20app&subproject_id=!*&status_id=*&sort=id&limit=100&offset=100',
     )
+    expect(urls.issues('https://r.test', 'demo', 0, true)).toBe(
+      'https://r.test/issues.json?project_id=demo&subproject_id=!*&status_id=*&assigned_to_id=me&sort=id&limit=100&offset=0',
+    )
+    expect(readCurrentUser('{"user":{"id":7}}')).toBe(7)
+    expect(readCurrentUser('{"user":{}}')).toBe(undefined)
   })
 
   test('its answers are read, and what does not fit is dropped', async () => {

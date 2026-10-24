@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { KEY, REDMINE, fakeRedmine } from './fake-redmine'
+import { KEY, ME, REDMINE, fakeRedmine } from './fake-redmine'
 import type { FakeIssue } from './fake-redmine'
 import { CWD, PANE, open, world } from './fixtures'
 import type { FakeTask } from './fixtures'
@@ -132,6 +132,42 @@ test('both ways: a local change goes to Redmine, a new task becomes an issue', W
   await ui.press({ key: 'sync-now' })
   expect([...redmine.issues.values()].map(issue => issue.subject)).toContain('Local idea')
   expect((store.get(SYNC_KEY) as { settings: { excluded: string[] } }).settings.excluded).toEqual([])
+  await ui.unmount()
+})
+
+test('only mine: just the issues assigned to the key’s owner; a new task is assigned to them', WITH_KEY, async ($, on) => {
+  const redmine = fakeRedmine({
+    issues: [
+      { id: 1, subject: 'Mine', description: '', status: 1, priority: 2, assignee: ME },
+      { id: 2, subject: 'Someone else’s', description: '', status: 1, priority: 2, assignee: 3 },
+      { id: 3, subject: 'Nobody’s', description: '', status: 1, priority: 2 },
+    ],
+  })
+  const { clock, tasks, requests } = world(on, { isStateful: true, tasks: [], http: redmine.http, store: settings({ mode: 'both' }) })
+  await open($, clock)
+  // Off by default: every issue comes in.
+  expect(tasks.map(task => task.title)).toEqual(['Mine', 'Someone else’s', 'Nobody’s'])
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'sync-open' })
+  expect((await ui.find({ key: 'sync-scope' }))?.props.value).toBe('all')
+  await ui.select({ key: 'sync-scope', value: 'mine' })
+  expect(await ui.find({ type: 'Text', text: /· both ways · only mine$/ })).toBeDefined()
+  expect(requests.filter(one => one.url.includes('assigned_to_id=me'))).toHaveLength(0)
+
+  // Issue 2 is no longer listed: its task stays as it was, and is not sent back as new.
+  redmine.issues.get(2)!.subject = 'Renamed in Redmine'
+  tasks.push({ id: 'BL-9', title: 'Rate limiting', status: 'To Do', references: [] })
+  await ui.press({ key: 'sync-now' })
+  expect(requests.some(one => one.method === 'GET' && one.url.includes('&assigned_to_id=me&'))).toBe(true)
+  expect(tasks.map(task => task.title)).toEqual(['Mine', 'Someone else’s', 'Nobody’s', 'Rate limiting'])
+  const posts = requests.filter(one => one.method === 'POST')
+  expect(posts.map(one => one.body)).toEqual([
+    { issue: { project_id: 'demo', subject: 'Rate limiting', description: '', status_id: 1, assigned_to_id: ME } },
+  ])
+  // The new issue is the owner's, so it is in the list next time: nothing more is sent.
+  await ui.press({ key: 'sync-now' })
+  expect(requests.filter(one => one.method !== 'GET')).toHaveLength(1)
+  expect(tasks).toHaveLength(4)
   await ui.unmount()
 })
 

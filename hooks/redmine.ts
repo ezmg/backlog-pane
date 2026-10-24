@@ -49,9 +49,10 @@ export function issueIdOf(base: string, url: string): number | undefined {
 export const PAGE = 100
 
 export const urls = {
-  /** Every issue of the project, open and closed, not its subprojects', by id. */
-  issues: (base: string, project: string, offset: number) =>
-    `${base}/issues.json?project_id=${encodeURIComponent(project)}&subproject_id=!*&status_id=*&sort=id&limit=${PAGE}&offset=${offset}`,
+  /** Every issue of the project, open and closed, not its subprojects', by id; or only the key owner's. */
+  issues: (base: string, project: string, offset: number, onlyMine = false) =>
+    `${base}/issues.json?project_id=${encodeURIComponent(project)}&subproject_id=!*&status_id=*${onlyMine ? '&assigned_to_id=me' : ''}&sort=id&limit=${PAGE}&offset=${offset}`,
+  currentUser: (base: string) => `${base}/users/current.json`,
   project: (base: string, project: string) => `${base}/projects/${encodeURIComponent(project)}.json`,
   statuses: (base: string) => `${base}/issue_statuses.json`,
   priorities: (base: string) => `${base}/enumerations/issue_priorities.json`,
@@ -108,6 +109,12 @@ export function readPriorities(text: string): RedminePriority[] | undefined {
 export function readCreated(text: string): number | undefined {
   const doc = parse(text)
   return isRecord(doc) && isRecord(doc.issue) && typeof doc.issue.id === 'number' ? doc.issue.id : undefined
+}
+
+/** The id of the key's owner, from `/users/current.json`. */
+export function readCurrentUser(text: string): number | undefined {
+  const doc = parse(text)
+  return isRecord(doc) && isRecord(doc.user) && typeof doc.user.id === 'number' ? doc.user.id : undefined
 }
 
 /** Redmine's own words for a refused write (422 `{ errors: [...] }`), or the status. */

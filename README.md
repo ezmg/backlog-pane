@@ -145,7 +145,8 @@ Claude and Backlog.md's own tools all see them as ordinary tasks.
 3. In the pane, press **Integration…**, pick **Redmine** as the tracker, and type the
    server's URL (`https://redmine.example.com`) and the project's identifier (as in its
    URL, for example `my-app`).
-4. Pick the **Mode** and how often to **Sync**, then **Sync now**.
+4. Pick the **Mode**, which **Issues** (all of the project, or only those assigned to
+   you) and how often to **Sync**, then **Sync now**.
 
 **Modes:**
 
@@ -155,7 +156,9 @@ Claude and Backlog.md's own tools all see them as ordinary tasks.
 - **Both ways:** a field changed on one side is copied to the other. New Backlog.md tasks
   are created in Redmine too, and get the new issue's URL in their references.
 
-**What syncs:** every issue of the project, open and closed, not its subprojects'. For each
+**What syncs:** every issue of the project, open and closed, not its subprojects'; or, with
+**Only those assigned to me**, just the ones assigned to the API key's owner (you, or a
+group you are in). For each
 one, the title (subject), status, priority and description. Each new task gets the issue's
 URL (`…/issues/42`) in its references, which is how the pane finds the pair again; a task
 you already pointed at an issue that way is adopted instead of copied twice, with
@@ -177,8 +180,10 @@ board shows *1 conflict*, and **Integration…** shows both values with **Use Re
 5, 15, 30 or 60 minutes (5 by default), or **Only with the button**. The sync runs only
 while the pane is open; the first one starts when it opens.
 
-**Nothing is deleted** on either side. An issue that was deleted or moved out of the
-project leaves its task as it was. **Disconnect** (tracker **None**) stops the sync and
+**Nothing is deleted** on either side. An issue that was deleted, moved out of the
+project, or (with *only mine*) assigned to someone else leaves its task as it was, no
+longer synced; it syncs again if it comes back. With *only mine* in both-ways mode, a new
+Backlog.md task is created in Redmine assigned to you, so it stays in your list. **Disconnect** (tracker **None**) stops the sync and
 keeps the tasks.
 
 **Tasks from before.** In both-ways mode, the tasks that were in the project when you set
@@ -375,11 +380,11 @@ things to know:
 | Edit a criterion | `backlog task edit <id> --acceptance-criteria <1st> --acceptance-criteria <2nd> …` (the whole list, in order), then `--check-ac <n>` if it was ticked |
 | Description / plan | `backlog task edit <id> -d <text>` / `--plan <text>` |
 | Editor | `backlog config get defaultEditor`, then the editor on a temp file |
-| Redmine: read | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 a page) |
+| Redmine: read | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 a page), plus `&assigned_to_id=me` for only mine |
 | Redmine: copy an issue in | `backlog task create <title> -s <status> --priority <p> -d <text> --ref <issue URL>` |
 | Redmine: take a change | `backlog task edit <id> -t … -s … --priority … -d …` (only the fields that changed) |
 | Redmine: send a change (both ways) | `PUT /issues/<n>.json` with the fields that changed |
-| Redmine: send a new task (both ways) | `POST /issues.json`, then `backlog task edit <id> --add-ref <issue URL>` |
+| Redmine: send a new task (both ways) | `POST /issues.json` (with only mine, after `GET /users/current.json`, assigned to you), then `backlog task edit <id> --add-ref <issue URL>` |
 
 The editing commands were checked against Backlog.md 1.55.3. Rewriting the criteria list
 keeps the ticks of the criteria whose text did not change.
@@ -493,7 +498,7 @@ cover:
 - each status's colour and its **Closed** box, kept per project, and cards taking their status's colour;
 - every editing control, the inline field and the external editor;
 - both drafts;
-- the Redmine sync: the merge, read only and both ways, conflicts, mappings, refused
+- the Redmine sync: the merge, read only and both ways, only mine, conflicts, mappings, refused
   writes, the timer, a missing or wrong key, a missing project and an unreachable server;
 - the missing-CLI, uninitialized, failing-watch and headless states.
 

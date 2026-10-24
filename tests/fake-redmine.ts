@@ -4,6 +4,8 @@
 
 export const REDMINE = 'https://redmine.test'
 export const KEY = 'secret-key'
+/** The id of the user who owns KEY. */
+export const ME = 7
 
 export type FakeIssue = {
   id: number
@@ -11,6 +13,7 @@ export type FakeIssue = {
   description: string
   status: number
   priority: number
+  assignee?: number
 }
 
 export const STATUSES = [
@@ -42,6 +45,7 @@ export function fakeRedmine(options: { project?: string; issues?: FakeIssue[]; r
     const body = init.body ? (JSON.parse(init.body) as { issue: Record<string, unknown> }) : undefined
     if (path === `/projects/${project}.json`) return json(200, { project: { id: 1, identifier: project } })
     if (path.startsWith('/projects/')) return json(404, {})
+    if (path === '/users/current.json') return json(200, { user: { id: ME, login: 'me' } })
     if (path === '/issue_statuses.json') return json(200, { issue_statuses: STATUSES })
     if (path === '/enumerations/issue_priorities.json') return json(200, { issue_priorities: PRIORITIES })
     if (path.startsWith('/issues.json?') && method === 'GET') {
@@ -49,7 +53,8 @@ export function fakeRedmine(options: { project?: string; issues?: FakeIssue[]; r
       if (query.get('project_id') !== project) return json(404, {})
       const offset = Number(query.get('offset') ?? 0)
       const limit = Number(query.get('limit') ?? 25)
-      const all = [...issues.values()].sort((a, b) => a.id - b.id)
+      const mine = query.get('assigned_to_id') === 'me'
+      const all = [...issues.values()].filter(issue => !mine || issue.assignee === ME).sort((a, b) => a.id - b.id)
       return json(200, {
         issues: all.slice(offset, offset + limit).map(issue => ({
           id: issue.id,
@@ -71,6 +76,7 @@ export function fakeRedmine(options: { project?: string; issues?: FakeIssue[]; r
         description: String(body.issue.description ?? ''),
         status: Number(body.issue.status_id ?? 1),
         priority: Number(body.issue.priority_id ?? 2),
+        assignee: body.issue.assigned_to_id === undefined ? undefined : Number(body.issue.assigned_to_id),
       })
       return json(201, { issue: { id } })
     }

@@ -93,6 +93,8 @@ export type RedmineSettings = {
   url: string
   project: string
   mode: SyncMode
+  /** Only the issues assigned to the key's owner; new tasks sent to Redmine are assigned to them. */
+  onlyMine: boolean
   /** Minutes between automatic syncs while the pane is open; 0: only by the button. */
   intervalMin: number
   /** Redmine status id → Backlog.md status, and priority id → Backlog.md priority. */

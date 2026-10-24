@@ -157,7 +157,8 @@ normales.
 3. En el panel, pulsa **Integración…**, elige **Redmine** como gestor y escribe la URL del
    servidor (`https://redmine.example.com`) y el identificador del proyecto (el de su URL,
    por ejemplo `mi-app`).
-4. Elige el **Modo** y cada cuánto **Sincronizar**, y pulsa **Sincronizar ahora**.
+4. Elige el **Modo**, qué **Peticiones** (todas las del proyecto, o solo las asignadas a
+   ti) y cada cuánto **Sincronizar**, y pulsa **Sincronizar ahora**.
 
 **Modos:**
 
@@ -169,7 +170,8 @@ normales.
   referencias.
 
 **Qué se sincroniza:** todas las peticiones del proyecto, abiertas y cerradas, sin las de
-sus subproyectos. De cada una, el título (asunto), el estado, la prioridad y la
+sus subproyectos; o, con **Solo las asignadas a mí**, solo las asignadas al dueño de la
+clave de API (tú, o un grupo al que perteneces). De cada una, el título (asunto), el estado, la prioridad y la
 descripción. Cada tarea nueva lleva la URL de la petición (`…/issues/42`) en sus
 referencias, y así el panel vuelve a encontrar la pareja; una tarea que ya apuntaba así a
 una petición se adopta en vez de copiarse dos veces, y ganan los valores de Redmine.
@@ -191,8 +193,10 @@ ninguno: el tablero muestra *1 conflicto*, e **Integración…** enseña los dos
 tablero, y sola cada 5, 15, 30 o 60 minutos (5 por defecto), o **Solo con el botón**. La
 sincronización solo corre con el panel abierto; la primera empieza al abrirlo.
 
-**No se borra nada** en ningún lado. Una petición borrada o movida fuera del proyecto deja
-su tarea como estaba. **Desconectar** (gestor **Ninguno**) para la sincronización y
+**No se borra nada** en ningún lado. Una petición borrada, movida fuera del proyecto o
+(con *solo mías*) asignada a otra persona deja su tarea como estaba, sin sincronizarse;
+vuelve a sincronizarse si regresa. Con *solo mías* en modo bidireccional, una tarea nueva
+de Backlog.md se crea en Redmine asignada a ti, para que siga en tu lista. **Desconectar** (gestor **Ninguno**) para la sincronización y
 conserva las tareas.
 
 **Tareas de antes.** En modo bidireccional, las tareas que ya estaban en el proyecto al
@@ -399,11 +403,11 @@ Linux. Tres cosas a tener en cuenta:
 | Editar un criterio | `backlog task edit <id> --acceptance-criteria <1.º> --acceptance-criteria <2.º> …` (la lista entera, en orden), y después `--check-ac <n>` si estaba marcado |
 | Descripción / plan | `backlog task edit <id> -d <texto>` / `--plan <texto>` |
 | Editor | `backlog config get defaultEditor`, y luego el editor con un archivo temporal |
-| Redmine: leer | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 por página) |
+| Redmine: leer | `GET /projects/<id>.json`, `/issue_statuses.json`, `/enumerations/issue_priorities.json`, `/issues.json?project_id=<id>&subproject_id=!*&status_id=*` (100 por página), más `&assigned_to_id=me` con solo mías |
 | Redmine: copiar una petición | `backlog task create <título> -s <estado> --priority <p> -d <texto> --ref <URL de la petición>` |
 | Redmine: recibir un cambio | `backlog task edit <id> -t … -s … --priority … -d …` (solo los campos que cambiaron) |
 | Redmine: enviar un cambio (bidireccional) | `PUT /issues/<n>.json` con los campos que cambiaron |
-| Redmine: enviar una tarea nueva (bidireccional) | `POST /issues.json`, y luego `backlog task edit <id> --add-ref <URL de la petición>` |
+| Redmine: enviar una tarea nueva (bidireccional) | `POST /issues.json` (con solo mías, tras `GET /users/current.json`, asignada a ti), y luego `backlog task edit <id> --add-ref <URL de la petición>` |
 
 Los comandos de edición se comprobaron con Backlog.md 1.55.3. Al reescribir la lista de
 criterios se conservan las marcas de los criterios cuyo texto no ha cambiado.
@@ -521,7 +525,7 @@ Cubren:
 - el color de cada estado y su casilla **Cerrado**, guardados por proyecto, y las tarjetas con el color de su estado;
 - cada control de edición, el campo de varias líneas y el editor externo;
 - los dos borradores;
-- la sincronización con Redmine: la fusión, solo lectura y bidireccional, conflictos,
+- la sincronización con Redmine: la fusión, solo lectura y bidireccional, solo mías, conflictos,
   correspondencias, escrituras rechazadas, el temporizador, una clave que falta o es
   incorrecta, un proyecto que no existe y un servidor inalcanzable;
 - los estados de CLI ausente, proyecto sin inicializar, vigilancia que falla y sin
