@@ -20,22 +20,22 @@ del prompt. El prompt **nunca se envía por ti**.
 
 ## Funciones
 
-- **Tablero en vivo.** En la terminal y en la app de escritorio, una columna con borde por
-  estado, en el orden de tu configuración, encabezada por el estado como una etiqueta de
-  su color. Cada tarjeta muestra su título (en dos líneas si las necesita), su ID y los
-  criterios cumplidos. Arrastra una tarjeta a otra columna para moverla, o usa el teclado
-  (ver [Atajos](#atajos)). El estado final (normalmente *Done*) muestra solo sus tareas más
+- **Tablero en vivo.** En la terminal y en la app de escritorio, una columna por estado en
+  el orden de tu configuración, encabezada por el estado como una etiqueta de su color.
+  Cada tarjeta es un recuadro con el borde del color de su estado, con su título (en dos
+  líneas si las necesita), su ID y los criterios cumplidos; una tarjeta movida a otra
+  columna toma el color de esa columna. Arrastra una tarjeta a otra columna para moverla,
+  o usa el teclado (ver [Atajos](#atajos)). El estado final (normalmente *Done*) muestra solo sus tareas más
   recientes. VS Code y el móvil muestran las mismas tareas como una lista agrupada por
   estado, con el estado final plegado.
-- **Estados cerrados.** Pon estados como *Cancelled* en la opción `closedStatuses`. Se
-  muestran atenuados y plegados como el estado final, y ◀/▶ y las flechas del tablero se
-  los saltan. Aun así puedes mover una tarea ahí con el selector de estado o arrastrándola.
-- **Crear y eliminar estados.** **Estados…** muestra todos los estados con su número de
-  tareas. Añade uno y elige dónde va (al principio o después de cualquier estado), o
-  elimina uno que no tenga tareas.
+- **Estados, desde el panel.** **Estados…** muestra todos los estados con su número de
+  tareas. Ahí añades uno y eliges dónde va, eliminas uno sin tareas, eliges el color de
+  cada estado y marcas **Cerrado** en estados como *Cancelled*. Los cerrados salen
+  atenuados y plegados como el estado final, y ◀/▶ y las flechas del tablero se los
+  saltan; aun así puedes mover una tarea ahí con el selector de estado o arrastrándola.
 - **Colores que siguen tu tema.** Los estados usan colores del tema, así que encajan con
-  temas claros y oscuros: el primer estado, uno tipo *In Progress* y el final tienen cada
-  uno el suyo, y los demás se van turnando. Las tareas de prioridad alta llevan un **`!`**
+  temas claros y oscuros. Si no eliges uno, el primer estado, uno tipo *In Progress* y el
+  final tienen cada uno el suyo, y los demás se van turnando. Las tareas de prioridad alta llevan un **`!`**
   en el color de error, para que el significado no dependa solo del color.
 - **Nueva tarea.** **+ Nueva tarea** abre un campo para el título. **Cancelar** lo cierra,
   y se cierra solo cuando la tarea se ha creado.
@@ -119,9 +119,21 @@ Backlog.md no tiene un comando para esto, así que el panel:
 3. ejecuta `backlog config get statuses` y, si Backlog.md no lee exactamente la lista
    nueva, deja el archivo como estaba y lo avisa.
 
-**Los estados cerrados** se indican en la opción del plugin `closedStatuses`, por ejemplo
-`Cancelled` (varios, separados por comas; da igual mayúsculas o minúsculas). El estado
-final siempre es final, esté en la lista o no.
+Cada fila tiene además:
+
+- **Color:** uno de los colores del tema (Azul, Azul acero, Verde azulado, Verde, Ámbar,
+  Naranja, Rojo, Morado, Lavanda, Gris) o **Automático**, el que le daría el panel. La
+  etiqueta del estado, el borde de sus tarjetas y su muestra lo toman al momento. En el
+  móvil se van cambiando con un botón.
+- **Cerrado:** un estado cerrado sale plegado y atenuado, y ◀/▶ y las flechas del tablero
+  se lo saltan. El estado final siempre es final, así que no tiene casilla.
+
+Los colores y los estados cerrados se guardan **por proyecto**, en el almacén que Claude
+Code da al mod (por el archivo de configuración del proyecto), porque la configuración de
+Backlog.md no tiene sitio para ellos. Son solo tuyos: no van en el repositorio, así que tu
+equipo no los comparte, y un proyecto movido a otra carpeta empieza de cero. La opción
+`closedStatuses` (más abajo) solo es el valor inicial de un proyecto en el que nunca se ha
+marcado ninguna casilla **Cerrado**.
 
 ## Editar textos largos
 
@@ -161,24 +173,26 @@ en la terminal:_
 ```text
 [ + Nueva tarea ] [ Estados… ]
 
-╭─────────────╮ ╭─────────────╮ ╭─────────────╮ ╭─────────────╮
-│  Cancell… 1 │ │  To Do  1   │ │  In Prog… 1 │ │  Done  2    │
-│             │ │             │ │             │ │             │
-│ Old export  │ │ ! Rate      │ │ ! Write the │ │ Add login   │
-│ idea        │ │   limiting… │ │   JSON str… │ │ page        │
-│ TASK-5      │ │ TASK-3      │ │ TASK-1 · 1… │ │ TASK-2      │
-│             │ │             │ │             │ │             │
-│             │ │             │ │             │ │ Dark mode   │
-│             │ │             │ │             │ │ TASK-4      │
-│             │ │             │ │             │ │             │
-╰─────────────╯ ╰─────────────╯ ╰─────────────╯ ╰─────────────╯
+ Cancelled  1     To Do  1         In Progress  1   Done  2
+
+╭─────────────╮  ╭─────────────╮  ╭─────────────╮  ╭─────────────╮
+│ Old export  │  │ ! Rate      │  │ ! Write the │  │ Add login   │
+│ idea        │  │   limiting… │  │   JSON str… │  │ page        │
+│ TASK-5      │  │ TASK-3      │  │ TASK-1 · 1… │  │ TASK-2      │
+╰─────────────╯  ╰─────────────╯  ╰─────────────╯  ╰─────────────╯
+                                                   ╭─────────────╮
+                                                   │ Dark mode   │
+                                                   │ TASK-4      │
+                                                   ╰─────────────╯
+
 Arrastra una tarjeta a otra columna, o haz clic en ella y pulsa
 ←/→ para moverla, ↑/↓ para elegir otra, Enter para abrirla.
 ```
 
-_Es el panel acoplado en una terminal de 150 columnas (Claude Code 2.1.310), con Cancelled
-como estado cerrado. En pantalla, cada estado es una etiqueta de su color, el borde de su
-columna toma ese color y Cancelled sale atenuado._
+_Es el panel acoplado en una terminal de 150 columnas (Claude Code 2.1.310). En pantalla
+cada estado es una etiqueta de su color y el borde de cada tarjeta toma el color de su
+estado; la tarjeta seleccionada tiene el borde grueso, y la columna sobre la que arrastras
+una tarjeta muestra un hueco discontinuo donde caerá._
 
 Los nombres de los estados y de las tareas son los de tu proyecto; el panel no los traduce.
 
@@ -242,7 +256,7 @@ cerrarlo se detiene el proceso `--watch`.
 | --- | --- | --- |
 | `backlogPath` | *(vacío)* | Ruta completa al ejecutable `backlog`. Si está vacía, el mod prueba `backlog` en el PATH. En Windows, después prueba los binarios nativos que npm y bun instalan de forma global. |
 | `doneLimit` | `5` | Cuántas de las tareas más recientes del estado final (y de cada estado cerrado) muestra el tablero, y la lista cuando ese grupo está desplegado. |
-| `closedStatuses` | *(vacío)* | Estados que cuentan como cerrados además del final, separados por comas (por ejemplo `Cancelled`). Se muestran atenuados y plegados, y ◀/▶ y las flechas del tablero se los saltan. |
+| `closedStatuses` | *(vacío)* | Opcional. Estados que empiezan como cerrados en un proyecto en el que nunca has marcado una casilla **Cerrado** en **Estados…**, separados por comas (por ejemplo `Cancelled`). En cuanto marcas o desmarcas una, el proyecto guarda su propia lista. |
 | `language` | `auto` | `en` (inglés), `es` (español) o `auto`. Con `auto`, el mod usa lo primero de esta lista que esté definido: el ajuste `language` de Claude Code (texto libre como `Español`, `Spanish` o `English`), luego `LC_ALL`, `LC_MESSAGES`, `LANG` y por último el idioma del sistema. Si no hay ninguno, usa inglés. Cualquier idioma que no sea español se muestra en inglés. |
 
 Se cambian en los ajustes del plugin, en `/plugin`. En una sesión que carga el mod desde una
@@ -420,6 +434,7 @@ Cubren:
 - la detección del idioma y los dos idiomas;
 - la disposición, el puntero y las teclas del tablero, y la lista de respaldo;
 - los estados cerrados, y crear y eliminar estados (con la reescritura de la configuración y su comprobación);
+- el color de cada estado y su casilla **Cerrado**, guardados por proyecto, y las tarjetas con el color de su estado;
 - cada control de edición, el campo de varias líneas y el editor externo;
 - los dos borradores;
 - los estados de CLI ausente, proyecto sin inicializar, vigilancia que falla y sin
