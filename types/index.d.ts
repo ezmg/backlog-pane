@@ -42,6 +42,7 @@ declare module 'claude-code' {
       detail: TaskDetail | null
       isDoneOpen: boolean
       notice: string | null
+      isCreating: boolean
     }
   }
 }

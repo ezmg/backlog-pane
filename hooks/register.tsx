@@ -38,6 +38,7 @@ const selectedId = atom({ plugin: 'backlog-pane', key: 'selectedId' } as const, 
 const detail = atom({ plugin: 'backlog-pane', key: 'detail' } as const, null as TaskDetail | null)
 const isDoneOpen = atom({ plugin: 'backlog-pane', key: 'isDoneOpen' } as const, false)
 const notice = atom({ plugin: 'backlog-pane', key: 'notice' } as const, null as string | null)
+const isCreating = atom({ plugin: 'backlog-pane', key: 'isCreating' } as const, false)
 
 type Run = { ok: true; stdout: string } | { ok: false; stderr: string }
 
@@ -243,6 +244,7 @@ async function create($: Engine, title: string) {
   await update($, notice, () =>
     run.ok ? t.created(createdId(run.stdout) ?? t.theTask) : errorLine(run.stderr, t.couldNotCreate),
   )
+  if (run.ok) await update($, isCreating, () => false)
 }
 
 async function work($: Engine, id: string) {
@@ -407,10 +409,23 @@ export const register: Register = (on, options) => {
     const list = await read($, tasks)
     const isOpen = await read($, isDoneOpen)
     const groups = groupTasks(list, order, doneLimit)
+    const creating = await read($, isCreating)
     return (
       <Box flexDirection="column" gap={1}>
-        {Input ? (
-          <Input key="new-task" placeholder={t.newTaskPlaceholder} submitLabel={t.create} onSubmit={value => create($, value)} />
+        {Input && creating ? (
+          <Box flexDirection="row" gap={1}>
+            <Input
+              key="new-task"
+              autoFocus
+              placeholder={t.newTaskPlaceholder}
+              submitLabel={t.create}
+              onSubmit={value => create($, value)}
+            />
+            <Button key="new-task-cancel" label={t.cancel} onPress={() => update($, isCreating, () => false)} />
+          </Box>
+        ) : null}
+        {Input && !creating ? (
+          <Button key="new-task-open" label={t.newTask} onPress={() => update($, isCreating, () => true)} />
         ) : null}
         {footer}
         {list.length === 0 ? <Text dimColor>{t.noTasks}</Text> : null}

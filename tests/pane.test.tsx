@@ -69,6 +69,7 @@ type World = {
   // child left suspended mid-stream keeps the kit's acts from settling.)
   watch?: { stdout?: string[]; stderr?: string; code?: number }
   list?: ProcessRunResult
+  create?: ProcessRunResult
   env?: Record<string, string>
   // Claude Code's settings, as `$.settings.read` answers them.
   settings?: Record<string, unknown>
@@ -106,7 +107,7 @@ function world(on: On, options: World = {}) {
       const view = summary?.id === VIEW.task.id ? VIEW : { ...VIEW, task: { ...VIEW.task, ...summary } }
       return { value: ok(JSON.stringify(view, null, 2)) }
     }
-    if (argv[0] === 'task' && argv[1] === 'create') return { value: ok('Created task BL-4\nFile: x.md') }
+    if (argv[0] === 'task' && argv[1] === 'create') return { value: options.create ?? ok('Created task BL-4\nFile: x.md') }
     return { value: ok('Updated task') }
   })
   on('process.spawn', async function* () {
@@ -176,9 +177,15 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await open($, clock)
     const ui = await $.ui.mount({ ...PANE, surface })
 
+    // The field shows only after "+ New task", and goes again once created.
+    expect(await ui.find({ type: 'Input' })).toBe(undefined)
+    await ui.press({ key: 'new-task-open' })
+    expect((await ui.find({ key: 'new-task' }))?.props.autoFocus).toBe(true)
     await ui.input({ key: 'new-task', text: '  Ship it  ' })
     expect(runs).toContainEqual(['task', 'create', 'Ship it'])
     expect(await ui.find({ type: 'Text', text: 'Created BL-4.' })).toBeDefined()
+    expect(await ui.find({ key: 'new-task' })).toBe(undefined)
+    expect((await ui.find({ key: 'new-task-open' }))?.text).toBe('+ New task')
 
     await ui.press({ key: 'task:BL-1' })
     await ui.select({ key: 'status', value: 'Done' })
@@ -267,6 +274,44 @@ test('with no surface, /backlog answers in Spanish too', { options: { language: 
   expect(answer.text).toContain('BL-2  Add login')
 })
 
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`${surface}: Cancel hides the new task field without creating`, async ($, on) => {
+    const { clock, runs } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'new-task-open' })
+    expect(await ui.find({ key: 'new-task' })).toBeDefined()
+    await ui.press({ key: 'new-task-cancel' })
+    expect(await ui.find({ key: 'new-task' })).toBe(undefined)
+    expect(runs.some(argv => argv[1] === 'create')).toBe(false)
+    await ui.unmount()
+  })
+
+  test(`${surface}: a failed create keeps the field open`, async ($, on) => {
+    const { clock } = world(on, { create: fail('Error: title too long') })
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await ui.press({ key: 'new-task-open' })
+    await ui.input({ key: 'new-task', text: 'x' })
+    expect(await ui.find({ type: 'Text', text: 'Error: title too long' })).toBeDefined()
+    expect(await ui.find({ key: 'new-task' })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('Spanish: "+ Nueva tarea"', { options: { language: 'es' } }, async ($, on) => {
+  const { clock } = world(on)
+  await open($, clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'new-task-open' }))?.text).toBe('+ Nueva tarea')
+  await ui.press({ key: 'new-task-open' })
+  expect((await ui.find({ key: 'new-task' }))?.props.placeholder).toBe('Título de la nueva tarea')
+  expect((await ui.find({ key: 'new-task-cancel' }))?.text).toBe('Cancelar')
+  await ui.input({ key: 'new-task', text: 'Enviar' })
+  expect(await ui.find({ type: 'Text', text: 'Creada BL-4.' })).toBeDefined()
+  await ui.unmount()
+})
+
 test('a missing CLI says how to install it', async ($, on) => {
   const { clock } = world(on, { installed: false })
   await open($, clock)
@@ -300,11 +345,12 @@ test('a failing watch is restarted a few times, then offers Retry', async ($, on
   await ui.unmount()
 })
 
-test('mobile: status buttons instead of a picker, no creation field', async ($, on) => {
+test('mobile: status buttons instead of a picker, no creation button', async ($, on) => {
   const { clock, runs } = world(on)
   await open($, clock)
   const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
   expect(await ui.find({ type: 'Input' })).toBe(undefined)
+  expect(await ui.find({ key: 'new-task-open' })).toBe(undefined)
   await ui.press({ key: 'task:BL-2' })
   await ui.press({ key: 'status-1' })
   expect(runs).toContainEqual(['task', 'edit', 'BL-2', '--status', 'In Progress'])
