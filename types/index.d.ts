@@ -33,10 +33,23 @@ export type Phase =
   | { kind: 'failed'; message: string }
 
 /** One card of the board: a task as its surface module draws it. */
-export type BoardCard = { id: string; title: string; isHigh: boolean }
+export type BoardCard = {
+  id: string
+  title: string
+  isHigh: boolean
+  /** The card's second line: its id, and its criteria done (`BL-1 · 1/2`). */
+  meta: string
+}
 
 /** One column of the board: a status, its theme colour and its cards. */
-export type BoardColumn = { status: string; color: string; total: number; cards: BoardCard[] }
+export type BoardColumn = {
+  status: string
+  color: string
+  total: number
+  /** In the `closedStatuses` option: drawn dim, and ←/→ skip it. */
+  isClosed: boolean
+  cards: BoardCard[]
+}
 
 /** What the board's `Client` is handed: plain data, no closures. */
 export type BoardProps = {
@@ -58,11 +71,13 @@ declare module 'claude-code' {
       priorities: string[]
       selectedId: string | null
       detail: TaskDetail | null
-      isDoneOpen: boolean
+      openGroups: string[]
       notice: string | null
       editing: string | null
       isCreating: boolean
       isBoardFailed: boolean
+      isManagingStatuses: boolean
+      newStatusAt: number | null
     }
   }
 }

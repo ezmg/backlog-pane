@@ -13,6 +13,7 @@ import {
   args,
   candidates,
   classify,
+  configCandidates,
   createdId,
   editorFile,
   errorLine,
@@ -21,12 +22,16 @@ import {
   isHighPriority,
   isRecord,
   neighbours,
+  parseClosed,
   parsePriorities,
   parseStatuses,
   pickEditor,
   readTaskList,
   readTaskView,
   rewriteCriteria,
+  rewriteStatuses,
+  sameStatuses,
+  statusProblem,
   summarize,
 } from './cli'
 import { detectLanguage, strings } from './i18n'
@@ -51,7 +56,8 @@ const statuses = atom({ plugin: 'backlog-pane', key: 'statuses' } as const, [] a
 const priorities = atom({ plugin: 'backlog-pane', key: 'priorities' } as const, [] as string[])
 const selectedId = atom({ plugin: 'backlog-pane', key: 'selectedId' } as const, null as string | null)
 const detail = atom({ plugin: 'backlog-pane', key: 'detail' } as const, null as TaskDetail | null)
-const isDoneOpen = atom({ plugin: 'backlog-pane', key: 'isDoneOpen' } as const, false)
+// The folded groups of the list (the final status, the closed ones) that are unfolded.
+const openGroups = atom({ plugin: 'backlog-pane', key: 'openGroups' } as const, [] as string[])
 const notice = atom({ plugin: 'backlog-pane', key: 'notice' } as const, null as string | null)
 // What the task view is editing: `description`, `plan`, a criterion
 // (`criterion:<index>`), or the criterion awaiting a delete (`remove:<index>`).
@@ -59,12 +65,18 @@ const editing = atom({ plugin: 'backlog-pane', key: 'editing' } as const, null a
 const isCreating = atom({ plugin: 'backlog-pane', key: 'isCreating' } as const, false)
 // Set when the board's Client failed on a surface: the list stands in.
 const isBoardFailed = atom({ plugin: 'backlog-pane', key: 'isBoardFailed' } as const, false)
+// The statuses view, and where a new status goes in it (null: before the final one).
+const isManagingStatuses = atom({ plugin: 'backlog-pane', key: 'isManagingStatuses' } as const, false)
+const newStatusAt = atom({ plugin: 'backlog-pane', key: 'newStatusAt' } as const, null as number | null)
 
 type Run = { ok: true; stdout: string } | { ok: false; stderr: string }
 
 // Read from the plugin's options each time the module loads.
 let configured = ''
 let doneLimit = 5
+let closed: string[] = []
+// The session's working folder, from session.start: where the config is looked for from.
+let cwd = ''
 let languageOption: unknown = 'auto'
 // The language shown, detected once per load.
 let language: Language | null = null
@@ -428,6 +440,121 @@ async function create($: Engine, title: string) {
   if (run.ok) await update($, isCreating, () => false)
 }
 
+async function openStatuses($: Engine) {
+  await update($, isManagingStatuses, () => true)
+  await update($, isCreating, () => false)
+  await update($, editing, () => null)
+  await update($, notice, () => null)
+  // Read them again: they may have changed since the watch started.
+  await loadStatuses($)
+}
+
+async function closeStatuses($: Engine) {
+  await update($, isManagingStatuses, () => false)
+  await update($, editing, () => null)
+  await update($, newStatusAt, () => null)
+}
+
+/** The config file Backlog.md reads, nearest first, as it looks for it. */
+async function findConfig($: Engine): Promise<string | undefined> {
+  for (const path of configCandidates(cwd)) {
+    try {
+      if (await $.fs.exists(path)) return path
+    } catch {
+      // A path the host will not look at: try the next.
+    }
+  }
+  return undefined
+}
+
+/**
+ * Writes `next` as the project's statuses. Backlog.md has no command for
+ * it, so this rewrites only the `statuses` line of its config, then asks
+ * `backlog config get statuses` and puts the file back as it was when
+ * Backlog.md does not read exactly `next`. The one write outside the CLI.
+ */
+async function writeStatuses($: Engine, next: string[]): Promise<boolean> {
+  const t = await text($)
+  const path = await findConfig($)
+  if (!path) {
+    await update($, notice, () => t.configNotFound)
+    return false
+  }
+  let before: string
+  try {
+    before = await $.fs.read(path)
+  } catch (error) {
+    await update($, notice, () => String(error))
+    return false
+  }
+  const after = rewriteStatuses(before, next)
+  if (after === undefined) {
+    await update($, notice, () => t.configUnreadable)
+    return false
+  }
+  try {
+    await $.fs.write(path, after)
+  } catch (error) {
+    await update($, notice, () => String(error))
+    return false
+  }
+  const run = await backlog($, args.statuses())
+  if (!run.ok || !sameStatuses(parseStatuses(run.stdout), next)) {
+    try {
+      await $.fs.write(path, before)
+    } catch {
+      // Nothing more to do: the notice says the change did not take.
+    }
+    await update($, notice, () => t.configMismatch)
+    return false
+  }
+  await update($, statuses, () => next)
+  return true
+}
+
+/** Adds a status where the position picker says (by default, before the final one). */
+async function addStatus($: Engine, name: string) {
+  const t = await text($)
+  const order = await read($, statuses)
+  const position = (await read($, newStatusAt)) ?? Math.max(0, order.length - 1)
+  const problem = statusProblem(name, order)
+  if (problem) {
+    await update($, notice, () => t.statusProblem[problem] ?? problem)
+    return
+  }
+  const status = name.trim()
+  const at = Math.max(0, Math.min(order.length, position))
+  const next = [...order.slice(0, at), status, ...order.slice(at)]
+  if (await writeStatuses($, next)) {
+    await update($, notice, () => t.statusAdded(status))
+    await update($, newStatusAt, () => null)
+  }
+}
+
+/**
+ * Deletes a status no task is in. One that tasks are in, the one new tasks
+ * start in, and either of the last two are kept.
+ */
+async function removeStatus($: Engine, status: string) {
+  const t = await text($)
+  const order = await read($, statuses)
+  const inUse = (await read($, tasks)).some(task => task.status === status)
+  if (inUse || !order.includes(status)) return
+  if (order.length <= 2) {
+    await update($, notice, () => t.cannotRemoveLast)
+    return
+  }
+  const fallback = await backlog($, args.defaultStatus())
+  if (fallback.ok && fallback.stdout.trim().toLowerCase() === status.toLowerCase()) {
+    await update($, notice, () => t.cannotRemoveDefault(status))
+    return
+  }
+  if (await writeStatuses($, order.filter(one => one !== status))) {
+    await update($, notice, () => t.statusRemoved(status))
+    await update($, editing, () => null)
+  }
+}
+
 /**
  * What the board's surface module posted: a card moved to another column,
  * or opened. It came from code, so it is checked against the tasks shown.
@@ -443,7 +570,7 @@ async function onBoardMessage($: Engine, data: unknown) {
     return
   }
   if (data.type !== 'move' || typeof data.status !== 'string' || data.status === task.status) return
-  const shown = groupTasks(list, await read($, statuses), 0).map(group => group.status)
+  const shown = groupTasks(list, await read($, statuses), 0, closed).map(group => group.status)
   if (shown.includes(data.status)) await setStatus($, id, data.status)
 }
 
@@ -477,11 +604,13 @@ async function editWithClaude($: Engine, id: string) {
 export const register: Register = (on, options) => {
   configured = typeof options.backlogPath === 'string' ? options.backlogPath : ''
   doneLimit = typeof options.doneLimit === 'number' ? options.doneLimit : 5
+  closed = parseClosed(options.closedStatuses)
   languageOption = options.language
   language = null
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    cwd = e.cwd
     // A reload gives the board another try.
     await update($, isBoardFailed, () => false)
     await $.command.register({
@@ -535,8 +664,8 @@ export const register: Register = (on, options) => {
     const Input = hasForms && 'Input' in ui ? ui.Input : undefined
     const Select = hasForms && 'Select' in ui ? ui.Select : undefined
     // The board where a Client draws (terminal, desktop); the list elsewhere.
-    const hasBoard = e.surface === 'terminal' || e.surface === 'desktop'
-    const Client = hasBoard && 'Client' in ui ? ui.Client : undefined
+    const isBoardSurface = e.surface === 'terminal' || e.surface === 'desktop'
+    const Client = isBoardSurface && 'Client' in ui ? ui.Client : undefined
     const t = await text($)
     const now = await read($, phase)
     const message = await read($, notice)
@@ -632,16 +761,101 @@ export const register: Register = (on, options) => {
     const id = await read($, selectedId)
     const order = await read($, statuses)
 
+    if (await read($, isManagingStatuses)) {
+      const all = await read($, tasks)
+      const now = await read($, editing)
+      const shown = groupTasks(all, order, 0, closed)
+      const final = order[order.length - 1]
+      const at = (await read($, newStatusAt)) ?? Math.max(0, order.length - 1)
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="row" gap={1}>
+            <Button key="statuses-back" plain label={t.back} onPress={() => closeStatuses($)} />
+            <Text bold>{t.statusesTitle}</Text>
+          </Box>
+          {footer}
+          <Box flexDirection="column">
+            {order.map((status, i) => {
+              const count = all.filter(task => task.status === status).length
+              const group = shown.find(one => one.status === status)
+              const tags = [
+                status === final ? t.finalTag : null,
+                group?.isClosed ? t.closedTag : null,
+              ].filter(tag => tag !== null)
+              if (now === `remove-status:${status}`) {
+                return (
+                  <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                    <Text>{t.confirmRemoveStatus(status)}</Text>
+                    <Button
+                      key={`status-remove-yes-${i}`}
+                      variant="primary"
+                      label={t.remove}
+                      onPress={() => removeStatus($, status)}
+                    />
+                    <Button key="status-remove-no" label={t.keep} onPress={() => update($, editing, () => null)} />
+                  </Box>
+                )
+              }
+              return (
+                <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                  <Text color={group?.color}>■</Text>
+                  <Text bold={!group?.isClosed} dimColor={group?.isClosed}>
+                    {status}
+                  </Text>
+                  <Text dimColor>
+                    {t.taskCount(count)}
+                    {tags.length > 0 ? ` · ${tags.join(' · ')}` : ''}
+                  </Text>
+                  {count === 0 ? (
+                    <Button
+                      key={`status-remove-${i}`}
+                      plain
+                      dimColor
+                      label={t.remove}
+                      onPress={() => update($, editing, () => `remove-status:${status}`)}
+                    />
+                  ) : null}
+                </Box>
+              )
+            })}
+          </Box>
+          {Input && Select ? (
+            <Box flexDirection="column">
+              <Select
+                key="status-position"
+                label={t.position}
+                value={String(at)}
+                options={[
+                  { value: '0', label: t.atStart },
+                  ...order.map((status, i) => ({ value: String(i + 1), label: t.after(status) })),
+                ]}
+                onSelect={value => update($, newStatusAt, () => Number(value))}
+              />
+              <Input
+                key="status-new"
+                placeholder={t.newStatus}
+                submitLabel={t.add}
+                value=""
+                onSubmit={value => addStatus($, value)}
+              />
+            </Box>
+          ) : null}
+          <Text dimColor>{t.closedHint}</Text>
+          <Text dimColor>{t.statusesNote}</Text>
+        </Box>
+      )
+    }
+
     if (id) {
       const task = await read($, detail)
       const summary = (await read($, tasks)).find(one => one.id === id)
       const status = task?.status ?? summary?.status ?? ''
       const choices = order.includes(status) || !status ? order : [...order, status]
-      const color = groupTasks([], choices, 0).find(group => group.status === status)?.color
+      const color = groupTasks([], choices, 0, closed).find(group => group.status === status)?.color
       const title = task?.title ?? summary?.title ?? id
       const priority = task?.priority ?? summary?.priority ?? null
       const isHigh = isHighPriority(priority)
-      const around = neighbours(choices, status)
+      const around = neighbours(choices, status, closed)
       const now = await read($, editing)
       const stopEditing = () => update($, editing, () => null)
 
@@ -823,9 +1037,10 @@ export const register: Register = (on, options) => {
     }
 
     const list = await read($, tasks)
-    const isOpen = await read($, isDoneOpen)
-    const groups = groupTasks(list, order, doneLimit)
+    const unfolded = await read($, openGroups)
+    const groups = groupTasks(list, order, doneLimit, closed)
     const creating = await read($, isCreating)
+    const hasBoard = list.length > 0 && Client !== undefined && !(await read($, isBoardFailed))
     return (
       <Box flexDirection="column" gap={1}>
         {Input && creating ? (
@@ -840,51 +1055,62 @@ export const register: Register = (on, options) => {
             <Button key="new-task-cancel" label={t.cancel} onPress={() => update($, isCreating, () => false)} />
           </Box>
         ) : null}
-        {Input && !creating ? (
-          <Button key="new-task-open" label={t.newTask} onPress={() => update($, isCreating, () => true)} />
-        ) : null}
+        <Box flexDirection="row" flexWrap="wrap" gap={1}>
+          {Input && !creating ? (
+            <Button key="new-task-open" label={t.newTask} onPress={() => update($, isCreating, () => true)} />
+          ) : null}
+          <Button key="statuses-open" label={t.manageStatuses} onPress={() => openStatuses($)} />
+        </Box>
         {footer}
         {list.length === 0 ? <Text dimColor>{t.noTasks}</Text> : null}
-        {list.length > 0 && Client && !(await read($, isBoardFailed)) ? (
+        {hasBoard && Client ? (
           <Client key="board" module="./board.tsx" width="100%" props={board(groups, e.props.bodyColumns, t)} />
         ) : null}
-        {list.length > 0 && Client && !(await read($, isBoardFailed)) ? null : groups.map(group => {
-          const rows = group.tasks.map(task => (
-            <Button key={`task:${task.id}`} plain onPress={() => select($, task.id)}>
-              {isHighPriority(task.priority) ? <Text color="error">! </Text> : ''}
-              {task.id} {task.title}
-              {task.acceptanceCriteriaCount > 0 ? (
-                <Text dimColor>
-                  {' '}
-                  {task.acceptanceCriteriaCompleted}/{task.acceptanceCriteriaCount}
-                </Text>
-              ) : (
-                ''
-              )}
-            </Button>
-          ))
-          if (group.isFinal) {
-            return (
-              <Box key={`group:${group.status}`} flexDirection="column">
-                <Button key="toggle-done" plain onPress={() => update($, isDoneOpen, open => !open)}>
-                  {isOpen ? '▾' : '▸'} <Text color={group.color}>{group.status}</Text> <Text dimColor>({group.total})</Text>
+        {hasBoard
+          ? null
+          : groups.map(group => {
+              const rows = group.tasks.map(task => (
+                <Button key={`task:${task.id}`} plain onPress={() => select($, task.id)}>
+                  {isHighPriority(task.priority) ? <Text color="error">! </Text> : ''}
+                  {task.id} {task.title}
+                  {task.acceptanceCriteriaCount > 0 ? (
+                    <Text dimColor>
+                      {' '}
+                      {task.acceptanceCriteriaCompleted}/{task.acceptanceCriteriaCount}
+                    </Text>
+                  ) : (
+                    ''
+                  )}
                 </Button>
-                {isOpen ? rows : null}
-                {isOpen && group.total > group.tasks.length ? (
-                  <Text dimColor>{t.mostRecent(group.tasks.length, group.total)}</Text>
-                ) : null}
-              </Box>
-            )
-          }
-          return (
-            <Box key={`group:${group.status}`} flexDirection="column">
-              <Text bold color={group.color}>
-                {group.status} <Text dimColor>({group.total})</Text>
-              </Text>
-              {rows}
-            </Box>
-          )
-        })}
+              ))
+              if (group.isFinal || group.isClosed) {
+                const isOpen = unfolded.includes(group.status)
+                const toggle = () =>
+                  update($, openGroups, now =>
+                    now.includes(group.status) ? now.filter(one => one !== group.status) : [...now, group.status],
+                  )
+                return (
+                  <Box key={`group:${group.status}`} flexDirection="column">
+                    <Button key={`toggle:${group.status}`} plain dimColor={group.isClosed} onPress={toggle}>
+                      {isOpen ? '▾' : '▸'} <Text color={group.color}>{group.status}</Text>{' '}
+                      <Text dimColor>({group.total})</Text>
+                    </Button>
+                    {isOpen ? rows : null}
+                    {isOpen && group.total > group.tasks.length ? (
+                      <Text dimColor>{t.mostRecent(group.tasks.length, group.total)}</Text>
+                    ) : null}
+                  </Box>
+                )
+              }
+              return (
+                <Box key={`group:${group.status}`} flexDirection="column">
+                  <Text bold color={group.color}>
+                    {group.status} <Text dimColor>({group.total})</Text>
+                  </Text>
+                  {rows}
+                </Box>
+              )
+            })}
       </Box>
     )
   })
@@ -897,7 +1123,16 @@ function board(groups: ReturnType<typeof groupTasks>, width: number, t: Strings)
       status: group.status,
       color: group.color,
       total: group.total,
-      cards: group.tasks.map(task => ({ id: task.id, title: task.title, isHigh: isHighPriority(task.priority) })),
+      isClosed: group.isClosed,
+      cards: group.tasks.map(task => ({
+        id: task.id,
+        title: task.title,
+        isHigh: isHighPriority(task.priority),
+        meta:
+          task.acceptanceCriteriaCount > 0
+            ? `${task.id} · ${task.acceptanceCriteriaCompleted}/${task.acceptanceCriteriaCount}`
+            : task.id,
+      })),
     })),
     width,
     hint: t.boardHint,
