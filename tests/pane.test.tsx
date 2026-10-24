@@ -32,7 +32,7 @@ const BL1: FakeTask = {
 
 const TASKS: FakeTask[] = [
   BL1,
-  { id: 'BL-2', title: 'Add login', status: 'To Do' },
+  { id: 'BL-2', title: 'Add login', status: 'To Do', priority: 'high' },
   { id: 'BL-3', title: 'Old work', status: 'Done', updatedAt: '2026-01-02T00:00:00Z' },
 ]
 
@@ -206,6 +206,25 @@ for (const surface of ['terminal', 'desktop'] as const) {
       },
     ])
     expect(submitted).toBe(0)
+    await ui.unmount()
+  })
+}
+
+for (const surface of ['vscode', 'mobile'] as const) {
+  test(`${surface}: statuses are coloured by theme key and high priority is marked "!"`, async ($, on) => {
+    const { clock } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ type: 'Text', text: /^To Do/ }))?.props.color).toBe('suggestion')
+    expect((await ui.find({ type: 'Text', text: /^In Progress/ }))?.props.color).toBe('warning')
+    expect((await ui.find({ type: 'Text', text: 'Done' }))?.props.color).toBe('success')
+    const row = await ui.find({ key: 'task:BL-2' })
+    expect(row?.text).toContain('! BL-2 Add login')
+    expect((await ui.find({ type: 'Text', text: '! ' }))?.props.color).toBe('error')
+    expect((await ui.find({ key: 'task:BL-1' }))?.text).not.toContain('!')
+    await ui.press({ key: 'task:BL-2' })
+    expect((await ui.find({ type: 'Text', text: 'To Do' }))?.props.color).toBe('suggestion')
+    expect((await ui.find({ type: 'Text', text: /! Add login/ }))).toBeDefined()
     await ui.unmount()
   })
 }

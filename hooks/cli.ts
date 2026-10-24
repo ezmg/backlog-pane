@@ -2,6 +2,8 @@
 // and the grouping the pane draws. Nothing here touches `$`, so the tests
 // can cover it directly.
 
+import type { ThemeKey } from 'claude-code'
+
 import type { Checklist, TaskDetail, TaskSummary } from '../types'
 import type { Strings } from './i18n'
 
@@ -177,6 +179,7 @@ export type Group = {
   tasks: TaskSummary[]
   total: number
   isFinal: boolean
+  color: ThemeKey
 }
 
 const recency = (task: TaskSummary) => task.updatedAt ?? task.createdAt ?? ''
@@ -191,6 +194,7 @@ export function groupTasks(tasks: TaskSummary[], statuses: string[], doneLimit: 
   const final = order[order.length - 1]
   const names = [...order]
   for (const task of tasks) if (!names.includes(task.status)) names.push(task.status)
+  const colors = statusColors(names, final ?? '')
   return names.map(status => {
     let list = tasks.filter(task => task.status === status)
     const total = list.length
@@ -198,9 +202,33 @@ export function groupTasks(tasks: TaskSummary[], statuses: string[], doneLimit: 
     if (isFinal) {
       list = [...list].sort((a, b) => recency(b).localeCompare(recency(a))).slice(0, Math.max(0, doneLimit))
     }
-    return { status, tasks: list, total, isFinal }
+    return { status, tasks: list, total, isFinal, color: colors.get(status) ?? 'text' }
   })
 }
+
+const ROTATION: ThemeKey[] = ['permission', 'planMode', 'ide', 'merged']
+const IN_PROGRESS = /in[ -]?progress|en (curso|progreso)|doing|wip/i
+
+/**
+ * Each status's colour, by theme key so it follows the person's light or
+ * dark theme: the first status `suggestion`, one named like "In Progress"
+ * `warning`, the final one `success`, the others in turn from ROTATION.
+ * `names` is every status shown, in order; `final` the configured last.
+ */
+export function statusColors(names: string[], final: string): Map<string, ThemeKey> {
+  const colors = new Map<string, ThemeKey>()
+  let turn = 0
+  names.forEach((name, i) => {
+    if (name === final) colors.set(name, 'success')
+    else if (IN_PROGRESS.test(name)) colors.set(name, 'warning')
+    else if (i === 0) colors.set(name, 'suggestion')
+    else colors.set(name, ROTATION[turn++ % ROTATION.length] ?? 'permission')
+  })
+  return colors
+}
+
+/** Whether a task's priority is high, which the pane marks with "!". */
+export const isHighPriority = (priority: string | null | undefined) => priority?.trim().toLowerCase() === 'high'
 
 /** The board as plain text, for surfaces that draw no pane. */
 export function summarize(tasks: TaskSummary[], statuses: string[], t: Strings): string {

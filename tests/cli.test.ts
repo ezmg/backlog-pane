@@ -8,9 +8,11 @@ import {
   createdId,
   errorLine,
   groupTasks,
+  isHighPriority,
   parseStatuses,
   readTaskList,
   readTaskView,
+  statusColors,
   summarize,
 } from '../hooks/cli'
 import { strings } from '../hooks/i18n'
@@ -127,5 +129,40 @@ describe('grouping', () => {
     expect(text).toContain('A-2  Title of A-2')
     expect(summarize([task('A-1', 'To Do')], ['To Do'], strings('es'))).toContain('Backlog: 1 tarea')
     expect(summarize([], ['To Do'], strings('es'))).toContain('todavía no hay tareas')
+  })
+})
+
+describe('colours', () => {
+  test('theme keys by place: first, in progress, final, the rest in turn', async () => {
+    const colors = statusColors(['Backlog', 'Ready', 'In Progress', 'Review', 'QA', 'Blocked', 'Later', 'Done', 'Odd'], 'Done')
+    expect(Object.fromEntries(colors)).toEqual({
+      Backlog: 'suggestion',
+      Ready: 'permission',
+      'In Progress': 'warning',
+      Review: 'planMode',
+      QA: 'ide',
+      Blocked: 'merged',
+      Later: 'permission',
+      Done: 'success',
+      Odd: 'planMode',
+    })
+    expect(Object.fromEntries(statusColors(['To Do', 'In Progress', 'Done'], 'Done'))).toEqual({
+      'To Do': 'suggestion',
+      'In Progress': 'warning',
+      Done: 'success',
+    })
+    expect(statusColors(['Por hacer', 'En curso', 'Hecho'], 'Hecho').get('En curso')).toBe('warning')
+  })
+
+  test('groups carry their colour', async () => {
+    const groups = groupTasks([task('A-1', 'Review')], ['To Do', 'In Progress', 'Done'], 5)
+    expect(groups.map(group => group.color)).toEqual(['suggestion', 'warning', 'success', 'permission'])
+  })
+
+  test('high priority, whatever the case', async () => {
+    expect(isHighPriority('high')).toBe(true)
+    expect(isHighPriority(' High ')).toBe(true)
+    expect(isHighPriority('medium')).toBe(false)
+    expect(isHighPriority(null)).toBe(false)
   })
 })

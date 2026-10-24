@@ -16,6 +16,7 @@ import {
   createdId,
   errorLine,
   groupTasks,
+  isHighPriority,
   parseStatuses,
   readTaskList,
   readTaskView,
@@ -355,13 +356,19 @@ export const register: Register = (on, options) => {
       const summary = (await read($, tasks)).find(one => one.id === id)
       const status = task?.status ?? summary?.status ?? ''
       const choices = order.includes(status) || !status ? order : [...order, status]
+      const color = groupTasks([], choices, 0).find(group => group.status === status)?.color
+      const isHigh = isHighPriority(task?.priority ?? summary?.priority)
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" gap={1}>
             <Button key="back" plain label={t.back} onPress={() => select($, null)} />
             <Text dimColor>{id}</Text>
+            <Text color={color}>{status}</Text>
           </Box>
-          <Text bold>{task?.title ?? summary?.title ?? id}</Text>
+          <Text bold>
+            {isHigh ? <Text color="error">! </Text> : ''}
+            {task?.title ?? summary?.title ?? id}
+          </Text>
           {Select ? (
             <Select
               key="status"
@@ -410,6 +417,7 @@ export const register: Register = (on, options) => {
         {groups.map(group => {
           const rows = group.tasks.map(task => (
             <Button key={`task:${task.id}`} plain onPress={() => select($, task.id)}>
+              {isHighPriority(task.priority) ? <Text color="error">! </Text> : ''}
               {task.id} {task.title}
               {task.acceptanceCriteriaCount > 0 ? (
                 <Text dimColor>
@@ -425,7 +433,7 @@ export const register: Register = (on, options) => {
             return (
               <Box key={`group:${group.status}`} flexDirection="column">
                 <Button key="toggle-done" plain onPress={() => update($, isDoneOpen, open => !open)}>
-                  {isOpen ? '▾' : '▸'} {group.status} <Text dimColor>({group.total})</Text>
+                  {isOpen ? '▾' : '▸'} <Text color={group.color}>{group.status}</Text> <Text dimColor>({group.total})</Text>
                 </Button>
                 {isOpen ? rows : null}
                 {isOpen && group.total > group.tasks.length ? (
@@ -436,7 +444,7 @@ export const register: Register = (on, options) => {
           }
           return (
             <Box key={`group:${group.status}`} flexDirection="column">
-              <Text bold>
+              <Text bold color={group.color}>
                 {group.status} <Text dimColor>({group.total})</Text>
               </Text>
               {rows}
