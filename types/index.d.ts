@@ -10,6 +10,8 @@ export type TaskSummary = {
   status: string
   priority: string | null
   labels: string[]
+  /** Its references: URLs or paths; a synced task holds its issue's URL here. */
+  references: string[]
   acceptanceCriteriaCompleted: number
   acceptanceCriteriaCount: number
   createdAt: string | null
@@ -65,6 +67,57 @@ export type BoardMessage = { type: 'move'; id: string; status: string } | { type
 /** A project's colours (theme keys) and closed statuses; `closed` absent: the option's. */
 export type Prefs = { colors: Record<string, string>; closed?: string[] }
 
+/** A task's synced fields, in Backlog.md's terms (status and priority mapped). */
+export type SyncFields = { title: string; status: string; priority: string | null; description: string }
+
+export type SyncField = 'title' | 'status' | 'priority' | 'description'
+
+/** `read`: the tracker is only read. `both`: changes go both ways. */
+export type SyncMode = 'read' | 'both'
+
+/** What the last sync agreed on for one linked pair, by the tracker's key. */
+export type SyncLink = { taskId: string; base: SyncFields }
+
+/** One field that changed on both sides since the last sync, kept until the person picks one. */
+export type SyncConflict = {
+  key: string
+  taskId: string
+  field: SyncField
+  local: string | null
+  remote: string | null
+}
+
+/** How a project syncs with Redmine, as the person set it up in Integration…. */
+export type RedmineSettings = {
+  provider: 'redmine'
+  url: string
+  project: string
+  mode: SyncMode
+  /** Minutes between automatic syncs while the pane is open; 0: only by the button. */
+  intervalMin: number
+  /** Redmine status id → Backlog.md status, and priority id → Backlog.md priority. */
+  statusMap: Record<string, string>
+  priorityMap: Record<string, string>
+  /** Tasks that existed when the sync was set up: never sent to Redmine unless asked. */
+  excluded: string[]
+}
+
+/** What a project's sync knows between runs. */
+export type SyncData = {
+  links: Record<string, SyncLink>
+  conflicts: SyncConflict[]
+  /** Each issue's Redmine status and priority ids, from the last read. */
+  meta: Record<string, { statusId: number; priorityId: number | null }>
+  statuses: { id: number; name: string; isClosed: boolean }[]
+  priorities: { id: number; name: string; isDefault: boolean }[]
+  lastSync?: string
+  lastError?: string
+  warnings: string[]
+}
+
+/** The project's sync as the pane draws it. */
+export type SyncView = { settings: RedmineSettings | null; data: SyncData; isSyncing: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     'backlog-pane': {
@@ -83,6 +136,8 @@ declare module 'claude-code' {
       newStatusAt: number | null
       prefs: Prefs
       prefsKey: string | null
+      sync: SyncView
+      isManagingSync: boolean
     }
   }
 }
