@@ -187,12 +187,43 @@ a folder, they appear as rows in `/config`.
 | --- | --- |
 | Terminal (`claude`) | Everything, with the drag-and-drop board. In fullscreen the pane docks beside the transcript from 110 columns; otherwise it opens inline above the prompt. |
 | Claude Desktop, Code tab | Everything, with the drag-and-drop board. |
-| VS Code extension | Everything except the board: tasks are a list grouped by status. Not tested by hand. |
+| VS Code, Claude Code extension | Everything except the board: tasks are a list grouped by status. Not tested by hand. |
 | Mobile (Remote Control) | Browse tasks; move them with ◀/▶ or one button per status; set priority with buttons; tick and delete criteria; both drafts. Mobile has no text fields, so you can't create tasks, edit titles, add or edit criteria, or edit long text there. |
 | `claude -p`, Agent SDK, no surface | `/backlog` answers with the board as text. |
 
 If the board fails to draw on a surface, the pane shows the list there instead, until the
 mod reloads.
+
+**Not GitHub Copilot.** backlog-pane is a Claude Code mod: it runs only inside Claude Code,
+on the API Claude Code gives mods (the side pane, `/backlog`, the prompt box). GitHub
+Copilot has no such API, so the mod does nothing there. The VS Code row above means the
+Claude Code extension for VS Code. It can sit beside Copilot in the same VS Code, and the
+pane shows only in Claude Code's sessions. To reach your tasks from Copilot, use the MCP
+server that Backlog.md itself ships. That is separate from this mod, and it has no pane.
+
+### macOS
+
+The mod has no macOS-specific code. It works in the terminal (`claude`) and in the
+desktop app. It has not been tried by hand on a Mac yet: the tests run on Linux. Three
+things to know:
+
+- **Finding `backlog`.** In a terminal, `backlog` from `brew install backlog-md` or
+  `npm i -g backlog.md` is on PATH. Claude Desktop opened from the Dock may not have
+  `/opt/homebrew/bin` (or npm's global folder) on its PATH, and the pane then says the CLI
+  was not found. Set `backlogPath` to what `which backlog` prints.
+- **An editor, before 2.1.301.** Before Claude Code 2.1.301, the description and plan open in
+  your editor (see [Editing long text](#editing-long-text)). macOS has no default for the
+  mod to fall back on, so set one, once:
+
+  ```bash
+  backlog config set defaultEditor "code --wait"
+  ```
+
+  `VISUAL` or `EDITOR` work too. From 2.1.301 on, the text is edited in the pane and no
+  editor is needed.
+- **Dragging in a terminal** needs Claude Code in fullscreen and a terminal that reports
+  the mouse (Terminal.app, iTerm2, Ghostty, kitty, WezTerm). The desktop app needs
+  nothing. Where dragging does not take, click the board and use the arrow keys.
 
 ## How it works
 
