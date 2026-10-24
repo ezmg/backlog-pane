@@ -227,6 +227,13 @@ export function statusColors(names: string[], final: string): Map<string, ThemeK
   return colors
 }
 
+/** The statuses before and after `status` in `order`, where there are any. */
+export function neighbours(order: string[], status: string): { previous?: string; next?: string } {
+  const i = order.indexOf(status)
+  if (i === -1) return {}
+  return { previous: order[i - 1], next: order[i + 1] }
+}
+
 /** Whether a task's priority is high, which the pane marks with "!". */
 export const isHighPriority = (priority: string | null | undefined) => priority?.trim().toLowerCase() === 'high'
 

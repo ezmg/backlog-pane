@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { Engine } from 'claude-code/testing'
+import type { Engine, Mounted } from 'claude-code/testing'
 import type { On, ProcessRunResult, RenderSurface } from 'claude-code'
 
 // Nothing sits beneath the plugin under test: the hooks here stand for the
@@ -139,6 +139,14 @@ async function open($: Engine, clock: { settle: () => Promise<void> }) {
   return answer
 }
 
+type Drawing = Mounted<RenderSurface, 'Pane'>
+
+/** Opens a task the way the surface offers: its row in the list. */
+async function openTask(ui: Drawing, id: string) {
+  if (!(await ui.find({ key: `task:${id}` }))) await ui.press({ key: 'toggle-done' })
+  await ui.press({ key: `task:${id}` })
+}
+
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`${surface}: the board groups tasks by status and folds the final one`, async ($, on) => {
     const { clock } = world(on)
@@ -232,6 +240,40 @@ for (const surface of ['vscode', 'mobile'] as const) {
     await ui.press({ key: 'task:BL-2' })
     expect((await ui.find({ type: 'Text', text: 'To Do' }))?.props.color).toBe('suggestion')
     expect((await ui.find({ type: 'Text', text: /! Add login/ }))).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+  test(`${surface}: ◀ and ▶ move a task to the previous or next status (h, l)`, async ($, on) => {
+    const { clock, runs } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await openTask(ui, 'BL-1')
+    const previous = await ui.find({ key: 'status-prev' })
+    const next = await ui.find({ key: 'status-next' })
+    expect(previous?.text).toBe('◀ To Do')
+    expect(previous?.props.hotkey).toBe('h')
+    expect(next?.text).toBe('Done ▶')
+    expect(next?.props.hotkey).toBe('l')
+    await ui.press({ key: 'status-next' })
+    expect(runs).toContainEqual(['task', 'edit', 'BL-1', '--status', 'Done'])
+    await ui.press({ key: 'status-prev' })
+    expect(runs).toContainEqual(['task', 'edit', 'BL-1', '--status', 'To Do'])
+    await ui.unmount()
+  })
+
+  test(`${surface}: the first and last statuses have one arrow`, async ($, on) => {
+    const { clock } = world(on)
+    await open($, clock)
+    const ui = await $.ui.mount({ ...PANE, surface })
+    await openTask(ui, 'BL-2')
+    expect(await ui.find({ key: 'status-prev' })).toBe(undefined)
+    expect((await ui.find({ key: 'status-next' }))?.text).toBe('In Progress ▶')
+    await ui.press({ key: 'back' })
+    await openTask(ui, 'BL-3')
+    expect((await ui.find({ key: 'status-prev' }))?.text).toBe('◀ In Progress')
+    expect(await ui.find({ key: 'status-next' })).toBe(undefined)
     await ui.unmount()
   })
 }

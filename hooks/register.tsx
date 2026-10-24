@@ -17,6 +17,7 @@ import {
   errorLine,
   groupTasks,
   isHighPriority,
+  neighbours,
   parseStatuses,
   readTaskList,
   readTaskView,
@@ -233,7 +234,10 @@ async function setStatus($: Engine, id: string, status: string) {
   const run = await backlog($, args.setStatus(id, status))
   const t = await text($)
   await update($, notice, () => (run.ok ? t.moved(id, status) : errorLine(run.stderr, t.couldNotMove(id))))
-  if (run.ok) await loadDetail($, id)
+  if (!run.ok) return
+  // Shown at once; the watch's next list confirms it.
+  await update($, tasks, list => list.map(task => (task.id === id ? { ...task, status } : task)))
+  if ((await read($, selectedId)) === id) await loadDetail($, id)
 }
 
 async function create($: Engine, title: string) {
@@ -360,6 +364,7 @@ export const register: Register = (on, options) => {
       const choices = order.includes(status) || !status ? order : [...order, status]
       const color = groupTasks([], choices, 0).find(group => group.status === status)?.color
       const isHigh = isHighPriority(task?.priority ?? summary?.priority)
+      const around = neighbours(choices, status)
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" gap={1}>
@@ -386,6 +391,26 @@ export const register: Register = (on, options) => {
               ))}
             </Box>
           )}
+          {around.previous || around.next ? (
+            <Box flexDirection="row" gap={1}>
+              {around.previous ? (
+                <Button
+                  key="status-prev"
+                  hotkey="h"
+                  label={`◀ ${around.previous}`}
+                  onPress={() => setStatus($, id, around.previous ?? status)}
+                />
+              ) : null}
+              {around.next ? (
+                <Button
+                  key="status-next"
+                  hotkey="l"
+                  label={`${around.next} ▶`}
+                  onPress={() => setStatus($, id, around.next ?? status)}
+                />
+              ) : null}
+            </Box>
+          ) : null}
           <Button key="work" variant="primary" label={t.work} onPress={() => work($, id)} />
           {footer}
           {!task ? <Text dimColor>{t.loadingDetails}</Text> : null}
