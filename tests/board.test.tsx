@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { columnHeight, columnWidth, fit, hit, locate, nextOpenColumn } from '../hooks/board'
+import { cardLine, columnHeight, columnWidth, fit, hit, locate, nextOpenColumn } from '../hooks/board'
 import type { BoardProps } from '../types'
 import { PANE, open, world } from './fixtures'
 import type { FakeTask } from './fixtures'
@@ -263,7 +263,7 @@ test('Spanish: the board hint', { options: { language: 'es' } }, async ($, on) =
 })
 
 describe('board layout', () => {
-  const card = (id: string, title: string, isHigh = false) => ({ id, title, isHigh, meta: id })
+  const card = (id: string, title: string, isHigh = false) => ({ id, title, isHigh, criteria: null })
   const props: BoardProps = {
     columns: [
       { status: 'To Do', color: 'suggestion', total: 2, isClosed: false, cards: [card('A-1', 'a'), card('A-2', 'b', true)] },
@@ -310,6 +310,13 @@ describe('board layout', () => {
     expect(nextOpenColumn(props, 0, 1)).toBe(2)
     expect(nextOpenColumn(props, 2, -1)).toBe(0)
     expect(nextOpenColumn(props, 0, -1)).toBe(undefined)
+  })
+
+  test('the second line keeps the criteria count in a narrow column', async () => {
+    expect(cardLine('BL-1', '1/2', 20)).toBe('BL-1 · 1/2')
+    expect(cardLine('TASK-12', '0/2', 11)).toBe('TASK-12 0/2')
+    expect(cardLine('TASK-123', '10/12', 11)).toBe('TASK… 10/12')
+    expect(cardLine('TASK-123', null, 6)).toBe('TASK-…')
   })
 
   test('long titles are cut with an ellipsis', async () => {

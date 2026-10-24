@@ -110,6 +110,17 @@ export function nextOpenColumn(props: BoardProps, from: number, step: 1 | -1): n
   return undefined
 }
 
+/**
+ * A card's second line in `width` cells: its id and its criteria done
+ * (`BL-1 · 1/2`), closer together (`BL-1 1/2`) when that does not fit, and
+ * cut only then; the count is what a narrow column must not lose.
+ */
+export function cardLine(id: string, criteria: string | null, width: number): string {
+  if (!criteria) return fit(id, width)
+  for (const line of [`${id} · ${criteria}`, `${id} ${criteria}`]) if (line.length <= width) return line
+  return `${fit(id, Math.max(1, width - criteria.length - 1))} ${criteria}`
+}
+
 /** Cuts a text to `width` cells, an ellipsis at the cut. */
 export function fit(text: string, width: number): string {
   if (width <= 0) return ''
@@ -222,7 +233,7 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
                       </Text>
                     ))}
                     <Text inverse={isSelected} dimColor>
-                      {fit(card.meta, inner)}
+                      {cardLine(card.id, card.criteria, inner)}
                     </Text>
                   </Box>
                 )

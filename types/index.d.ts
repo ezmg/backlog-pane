@@ -37,8 +37,8 @@ export type BoardCard = {
   id: string
   title: string
   isHigh: boolean
-  /** The card's second line: its id, and its criteria done (`BL-1 · 1/2`). */
-  meta: string
+  /** Its acceptance criteria done, as `1/2`; null when it has none. */
+  criteria: string | null
 }
 
 /** One column of the board: a status, its theme colour and its cards. */

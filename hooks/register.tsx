@@ -1225,10 +1225,10 @@ function board(groups: ReturnType<typeof groupTasks>, width: number, t: Strings)
         id: task.id,
         title: task.title,
         isHigh: isHighPriority(task.priority),
-        meta:
+        criteria:
           task.acceptanceCriteriaCount > 0
-            ? `${task.id} · ${task.acceptanceCriteriaCompleted}/${task.acceptanceCriteriaCount}`
-            : task.id,
+            ? `${task.acceptanceCriteriaCompleted}/${task.acceptanceCriteriaCount}`
+            : null,
       })),
     })),
     width,
