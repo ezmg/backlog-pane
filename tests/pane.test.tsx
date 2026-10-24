@@ -13,9 +13,9 @@ for (const surface of ['vscode', 'mobile'] as const) {
     expect(await ui.find({ key: 'task:BL-1' })).toBeDefined()
     expect((await ui.find({ key: 'task:BL-1' }))?.text).toContain('1/2')
     // Done starts folded: its count shows, its tasks do not.
-    expect((await ui.find({ key: 'toggle-done' }))?.text).toContain('(1)')
+    expect((await ui.find({ key: 'toggle:Done' }))?.text).toContain('(1)')
     expect(await ui.find({ key: 'task:BL-3' })).toBe(undefined)
-    await ui.press({ key: 'toggle-done' })
+    await ui.press({ key: 'toggle:Done' })
     expect(await ui.find({ key: 'task:BL-3' })).toBeDefined()
     await ui.unmount()
   })

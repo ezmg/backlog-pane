@@ -20,11 +20,19 @@ del prompt. El prompt **nunca se envía por ti**.
 
 ## Funciones
 
-- **Tablero en vivo.** En la terminal y en la app de escritorio, una columna por estado en
-  el orden de tu configuración. Arrastra una tarjeta a otra columna para moverla, o usa el
-  teclado (ver [Atajos](#atajos)). El estado final (normalmente *Done*) muestra solo sus
-  tareas más recientes. VS Code y el móvil muestran las mismas tareas como una lista
-  agrupada por estado, con el estado final plegado.
+- **Tablero en vivo.** En la terminal y en la app de escritorio, una columna con borde por
+  estado, en el orden de tu configuración, encabezada por el estado como una etiqueta de
+  su color. Cada tarjeta muestra su título (en dos líneas si las necesita), su ID y los
+  criterios cumplidos. Arrastra una tarjeta a otra columna para moverla, o usa el teclado
+  (ver [Atajos](#atajos)). El estado final (normalmente *Done*) muestra solo sus tareas más
+  recientes. VS Code y el móvil muestran las mismas tareas como una lista agrupada por
+  estado, con el estado final plegado.
+- **Estados cerrados.** Pon estados como *Cancelled* en la opción `closedStatuses`. Se
+  muestran atenuados y plegados como el estado final, y ◀/▶ y las flechas del tablero se
+  los saltan. Aun así puedes mover una tarea ahí con el selector de estado o arrastrándola.
+- **Crear y eliminar estados.** **Estados…** muestra todos los estados con su número de
+  tareas. Añade uno y elige dónde va (al principio o después de cualquier estado), o
+  elimina uno que no tenga tareas.
 - **Colores que siguen tu tema.** Los estados usan colores del tema, así que encajan con
   temas claros y oscuros: el primer estado, uno tipo *In Progress* y el final tienen cada
   uno el suyo, y los demás se van turnando. Las tareas de prioridad alta llevan un **`!`**
@@ -54,8 +62,11 @@ del prompt. El prompt **nunca se envía por ti**.
   el borrador se añade debajo. No se envía nada.
 - **Inglés y español.** El panel, el comando y los dos borradores. Ver la opción
   `language`.
-- **Solo la CLI.** Cada cambio ejecuta un comando `backlog` (`task edit`, `task create`). El
-  mod nunca edita los archivos Markdown por su cuenta.
+- **Solo la CLI, con una excepción.** Cada cambio en una tarea ejecuta un comando `backlog`
+  (`task edit`, `task create`); el mod nunca edita los archivos de las tareas. Backlog.md no
+  tiene ningún comando que cambie la lista de estados, así que crear o eliminar uno
+  reescribe solo la línea `statuses:` de la configuración de Backlog.md (ver
+  [Estados](#estados)).
 - **Errores claros.** El panel te avisa, con un botón **Reintentar**, cuando la CLI no está
   instalada, la carpeta no tiene un proyecto de Backlog.md o la lista en vivo falla una y
   otra vez.
@@ -70,17 +81,47 @@ control a otro y Esc vuelve al prompt.
 | Tablero (terminal, escritorio) | Arrastrar una tarjeta a otra columna | Mueve la tarea allí. |
 | Tablero | Clic en una tarjeta y luego en otra columna | Mueve allí la tarjeta seleccionada. |
 | Tablero | Otro clic en la tarjeta seleccionada | Abre la tarea. |
-| Tablero, tras hacer clic en él | `←` / `→` | Mueve la tarjeta seleccionada una columna a la izquierda o a la derecha. |
-| Tablero, tras hacer clic en él | `↑` / `↓` | Selecciona la tarjeta de arriba o de abajo. La primera tecla selecciona la primera tarjeta. |
+| Tablero, tras hacer clic en él | `←` / `→` | Mueve la tarjeta seleccionada a la siguiente columna abierta a la izquierda o a la derecha, saltándose las cerradas. |
+| Tablero, tras hacer clic en él | `↑` / `↓` | Selecciona la tarjeta de arriba o de abajo. La primera tecla selecciona la primera tarjeta de la primera columna abierta. |
 | Tablero, tras hacer clic en él | `Enter` | Abre la tarea seleccionada. |
 | Tablero | `Esc` | Devuelve el teclado. |
-| Vista de la tarea | `h` | Mueve la tarea al estado anterior (◀). |
-| Vista de la tarea | `l` | Mueve la tarea al estado siguiente (▶). |
+| Vista de la tarea | `h` | Mueve la tarea al estado abierto anterior (◀). |
+| Vista de la tarea | `l` | Mueve la tarea al estado abierto siguiente (▶). |
 | Campo de varias líneas | `Enter` | Guarda. |
 | Campo de varias líneas | `Mayús+Enter`, o `\` y luego `Enter` | Empieza una línea nueva. |
 
 `h` y `l` funcionan mientras el panel tiene el teclado, no mientras escribes en el cuadro
 del prompt.
+
+## Estados
+
+Los estados son de cada proyecto: Backlog.md los guarda en su configuración
+(`backlog/config.yml`, o `backlog.config.yml` / `.backlog/config.yml`). El panel los lee con
+`backlog config get statuses` y dibuja las columnas en ese orden. El último es el estado
+final ("terminado"), la misma regla que usa Backlog.md.
+
+**Estados…** (junto a **+ Nueva tarea**) abre su lista:
+
+- **Añadir uno:** elige su **Posición** (al principio o después de cualquier estado; por
+  defecto, antes del final), escribe su nombre y pulsa Enter. El nombre no puede estar
+  vacío, repetir otro (aunque cambien las mayúsculas), tener comas, comillas o saltos de
+  línea, ni pasar de 40 caracteres.
+- **Eliminar uno:** **Eliminar** solo aparece junto a un estado sin tareas, y pide
+  confirmación. El estado en el que empiezan las tareas nuevas
+  (`backlog config get defaultStatus`) no se elimina, y un proyecto siempre conserva al
+  menos dos.
+
+Backlog.md no tiene un comando para esto, así que el panel:
+
+1. busca la configuración como lo hace Backlog.md, desde la carpeta de la sesión hacia
+   arriba;
+2. reescribe solo su línea `statuses:` y deja el resto de líneas como estaban;
+3. ejecuta `backlog config get statuses` y, si Backlog.md no lee exactamente la lista
+   nueva, deja el archivo como estaba y lo avisa.
+
+**Los estados cerrados** se indican en la opción del plugin `closedStatuses`, por ejemplo
+`Cancelled` (varios, separados por comas; da igual mayúsculas o minúsculas). El estado
+final siempre es final, esté en la lista o no.
 
 ## Editar textos largos
 
@@ -118,16 +159,26 @@ _Las capturas llegarán pronto. Mientras tanto, esta es una vista previa en text
 en la terminal:_
 
 ```text
-┌ Backlog ─────────────────────────────────────────────────────┐
-│ [ + Nueva tarea ]                                            │
-│                                                              │
-│ To Do (2)           In Progress (1)     Done (12)            │
-│ ! BL-2 Add login      BL-1 Write parser   BL-9 Old work      │
-│   BL-5 Rate limiting                      BL-8 Fix CI        │
-│                                                              │
-│ Arrastra una tarjeta a otra columna, o haz clic en ella y …  │
-└──────────────────────────────────────────────────────────────┘
+[ + Nueva tarea ] [ Estados… ]
+
+╭─────────────╮ ╭─────────────╮ ╭─────────────╮ ╭─────────────╮
+│  Cancell… 1 │ │  To Do  1   │ │  In Prog… 1 │ │  Done  2    │
+│             │ │             │ │             │ │             │
+│ Old export  │ │ ! Rate      │ │ ! Write the │ │ Add login   │
+│ idea        │ │   limiting… │ │   JSON str… │ │ page        │
+│ TASK-5      │ │ TASK-3      │ │ TASK-1 · 1… │ │ TASK-2      │
+│             │ │             │ │             │ │             │
+│             │ │             │ │             │ │ Dark mode   │
+│             │ │             │ │             │ │ TASK-4      │
+│             │ │             │ │             │ │             │
+╰─────────────╯ ╰─────────────╯ ╰─────────────╯ ╰─────────────╯
+Arrastra una tarjeta a otra columna, o haz clic en ella y pulsa
+←/→ para moverla, ↑/↓ para elegir otra, Enter para abrirla.
 ```
+
+_Es el panel acoplado en una terminal de 150 columnas (Claude Code 2.1.310), con Cancelled
+como estado cerrado. En pantalla, cada estado es una etiqueta de su color, el borde de su
+columna toma ese color y Cancelled sale atenuado._
 
 Los nombres de los estados y de las tareas son los de tu proyecto; el panel no los traduce.
 
@@ -190,11 +241,13 @@ cerrarlo se detiene el proceso `--watch`.
 | Opción | Predeterminado | Qué hace |
 | --- | --- | --- |
 | `backlogPath` | *(vacío)* | Ruta completa al ejecutable `backlog`. Si está vacía, el mod prueba `backlog` en el PATH. En Windows, después prueba los binarios nativos que npm y bun instalan de forma global. |
-| `doneLimit` | `5` | Cuántas de las tareas más recientes del estado final muestra el tablero, y la lista cuando ese grupo está desplegado. |
+| `doneLimit` | `5` | Cuántas de las tareas más recientes del estado final (y de cada estado cerrado) muestra el tablero, y la lista cuando ese grupo está desplegado. |
+| `closedStatuses` | *(vacío)* | Estados que cuentan como cerrados además del final, separados por comas (por ejemplo `Cancelled`). Se muestran atenuados y plegados, y ◀/▶ y las flechas del tablero se los saltan. |
 | `language` | `auto` | `en` (inglés), `es` (español) o `auto`. Con `auto`, el mod usa lo primero de esta lista que esté definido: el ajuste `language` de Claude Code (texto libre como `Español`, `Spanish` o `English`), luego `LC_ALL`, `LC_MESSAGES`, `LANG` y por último el idioma del sistema. Si no hay ninguno, usa inglés. Cualquier idioma que no sea español se muestra en inglés. |
 
 Se cambian en los ajustes del plugin, en `/plugin`. En una sesión que carga el mod desde una
-carpeta, aparecen como filas en `/config`.
+carpeta, aparecen como filas en `/config` y se guardan en tus ajustes de usuario
+(`~/.claude/settings.json`, en `pluginConfigs`), no en los del proyecto.
 
 ## Dónde funciona
 
@@ -251,6 +304,8 @@ Linux. Tres cosas a tener en cuenta:
 | Prioridades | `backlog config get priorities` |
 | Detalles de la tarea | `backlog task view <id> --json` |
 | Cambiar el estado (selector, ◀ ▶, tablero) | `backlog task edit <id> --status <estado>` |
+| Crear / eliminar un estado | Reescribe la línea `statuses:` de la configuración de Backlog.md y lo comprueba con `backlog config get statuses` (la única escritura fuera de la CLI) |
+| Estado en el que empiezan las tareas nuevas | `backlog config get defaultStatus` |
 | Crear una tarea | `backlog task create <título>` |
 | Renombrar | `backlog task edit <id> -t <título>` |
 | Cambiar la prioridad | `backlog task edit <id> --priority <prioridad>` |
@@ -282,8 +337,14 @@ Tras 5 fallos seguidos, el panel muestra el error y un botón **Reintentar**.
   `backlog config set defaultEditor "\"C:\Program Files\Microsoft VS Code\Code.exe\" --wait"`.
 - El panel espera al editor externo hasta diez minutos, y el archivo temporal se queda en
   la carpeta temporal después.
-- Las tarjetas del tablero ocupan una fila cada una, así que los títulos largos se cortan.
-  Con muchos estados en un panel estrecho, las columnas se estrechan (8 celdas como mínimo).
+- Los títulos del tablero ocupan dos líneas como máximo, así que los largos se cortan. Con
+  muchos estados en un panel estrecho, las columnas se estrechan (12 celdas como mínimo).
+- **Estados:** el panel escribe la lista en la forma que usa `backlog init`
+  (`statuses: ["To Do", "Done"]`). Una lista escrita con un elemento por línea pasa a esa
+  única línea, y un comentario en esas líneas se pierde. Los recuentos no incluyen
+  borradores ni tareas archivadas, así que se puede eliminar un estado que use una tarea
+  archivada. El panel no reordena ni renombra estados existentes: para eso, edita la
+  configuración.
 - **Todavía no:** aprobación del plan, sincronización automática cuando Claude termina,
   hitos y la definición de terminado. No se muestran subtareas, dependencias, etiquetas ni
   responsables.
@@ -311,7 +372,7 @@ hooks/board.tsx                   el módulo de superficie Client del tablero (t
 hooks/cli.ts                      funciones puras: comandos, lector del flujo JSON, agrupación, colores, editor
 hooks/i18n.ts                     textos en inglés y español, detección del idioma
 types/index.d.ts                  el contrato de $.state, las props del tablero, las formas de Backlog.md
-tests/                            suites de claude plugin test (fixtures.ts es el mundo simulado)
+tests/                            suites de claude plugin test (fixtures.ts es el mundo simulado, con una configuración falsa)
 ```
 
 Ejecuta el mod desde una copia de trabajo para una sesión:
@@ -357,7 +418,8 @@ Cubren:
 
 - el lector del flujo, la agrupación, los colores y cada línea de comando;
 - la detección del idioma y los dos idiomas;
-- el puntero y las teclas del tablero, y la lista de respaldo;
+- la disposición, el puntero y las teclas del tablero, y la lista de respaldo;
+- los estados cerrados, y crear y eliminar estados (con la reescritura de la configuración y su comprobación);
 - cada control de edición, el campo de varias líneas y el editor externo;
 - los dos borradores;
 - los estados de CLI ausente, proyecto sin inicializar, vigilancia que falla y sin

@@ -76,6 +76,15 @@ export type World = {
   edit?: ProcessRunResult
   // What `backlog config get <key>` prints, by key.
   config?: Record<string, ProcessRunResult>
+  // The project's tasks (TASKS when not given).
+  tasks?: FakeTask[]
+  // The project's statuses, kept in a fake backlog/config.yml that
+  // `backlog config get statuses` reads; and where that file is.
+  statuses?: string[]
+  configPath?: string
+  // Backlog.md reads its statuses from somewhere else than the file the
+  // mod finds: a write is never seen.
+  isConfigElsewhere?: boolean
   env?: Record<string, string>
   // Claude Code's settings, as `$.settings.read` answers them.
   settings?: Record<string, unknown>
@@ -93,10 +102,21 @@ export type World = {
  * The fake file system: one file per path, however the path reaches a hook
  * (on Windows the engine may hand `/tmp/x` on as `\\tmp\\x` or `C:\\tmp\\x`).
  */
+/** The session's working folder in every test. */
+export const CWD = '/work/demo'
+
 class Files {
   private readonly texts = new Map<string, string>()
+  // A relative path is under CWD; `..` and `.` are resolved.
   private static key(path: string) {
-    return path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '').toLowerCase()
+    const slashed = path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '')
+    const parts: string[] = []
+    for (const part of (slashed.startsWith('/') ? slashed : `${CWD}/${slashed}`).split('/')) {
+      if (part === '' || part === '.') continue
+      if (part === '..') parts.pop()
+      else parts.push(part)
+    }
+    return `/${parts.join('/')}`.toLowerCase()
   }
   get(path: string) {
     return this.texts.get(Files.key(path))
@@ -104,13 +124,41 @@ class Files {
   set(path: string, text: string) {
     this.texts.set(Files.key(path), text)
   }
+  has(path: string) {
+    return this.texts.has(Files.key(path))
+  }
 }
+
+/** The statuses a config's flow `statuses: [...]` line lists, as Backlog.md reads them. */
+export function statusesIn(config: string | undefined): string[] {
+  const line = /^statuses:\s*(\[.*\])\s*$/m.exec(config ?? '')?.[1]
+  if (!line) return []
+  try {
+    return JSON.parse(line) as string[]
+  } catch {
+    return []
+  }
+}
+
+/** A config as `backlog init` writes it, with these statuses. */
+export const configWith = (statuses: string[]) =>
+  [
+    'project_name: "Demo"',
+    'default_status: "To Do"',
+    `statuses: [${statuses.map(one => JSON.stringify(one)).join(', ')}]`,
+    'labels: []',
+    'date_format: yyyy-mm-dd',
+    '',
+  ].join('\n')
 
 export function world(on: On, options: World = {}) {
   const runs: string[][] = []
   const editorRuns: { argv: readonly string[]; timeoutMs?: number }[] = []
   const fills: { text: string; mode?: string }[] = []
+  const tasks = options.tasks ?? TASKS
   const files = new Files()
+  const configPath = options.configPath ?? 'backlog/config.yml'
+  files.set(configPath, configWith(options.statuses ?? ['To Do', 'In Progress', 'Done']))
   let spawns = 0
   const clock = mock.clock(on)
   // English unless a test says otherwise: LANG is read before the runtime's
@@ -135,6 +183,7 @@ export function world(on: On, options: World = {}) {
     files.set(e.path, e.text)
     return { value: undefined }
   })
+  on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
   on('fs.read', (_, e) => {
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
@@ -156,7 +205,12 @@ export function world(on: On, options: World = {}) {
     runs.push(argv)
     const command = argv.join(' ')
     if (command === '--version') return { value: ok('1.55.3') }
-    if (command === 'config get statuses') return { value: ok('To Do, In Progress, Done\n') }
+    if (command === 'config get statuses') {
+      const listed = options.isConfigElsewhere
+        ? (options.statuses ?? ['To Do', 'In Progress', 'Done'])
+        : statusesIn(files.get(configPath))
+      return { value: ok(`${listed.join(', ')}\n`) }
+    }
     if (argv[0] === 'config' && argv[1] === 'get') {
       const answer = options.config?.[argv[2] ?? '']
       if (answer) return { value: answer }
@@ -164,10 +218,10 @@ export function world(on: On, options: World = {}) {
       return { value: ok('') }
     }
     if (command === 'task list --json') {
-      return { value: options.list ?? ok(JSON.stringify({ kind: 'task-list', tasks: TASKS })) }
+      return { value: options.list ?? ok(JSON.stringify({ kind: 'task-list', tasks })) }
     }
     if (argv[0] === 'task' && argv[1] === 'view') {
-      const summary = TASKS.find(one => one.id === argv[2])
+      const summary = tasks.find(one => one.id === argv[2])
       const view = summary?.id === VIEW.task.id ? VIEW : { ...VIEW, task: { ...VIEW.task, priority: null, ...summary } }
       return { value: ok(JSON.stringify(view, null, 2)) }
     }
@@ -178,7 +232,7 @@ export function world(on: On, options: World = {}) {
   on('process.spawn', async function* () {
     spawns += 1
     const watch = options.watch ?? {
-      stdout: [JSON.stringify({ schemaVersion: 1, kind: 'task-list', tasks: TASKS }, null, 2)],
+      stdout: [JSON.stringify({ schemaVersion: 1, kind: 'task-list', tasks }, null, 2)],
     }
     for (const text of watch.stdout ?? []) {
       // Cut each document in two, as a pipe may.
@@ -191,11 +245,11 @@ export function world(on: On, options: World = {}) {
   })
   /** The `task edit` commands run so far. */
   const edits = () => runs.filter(argv => argv[0] === 'task' && argv[1] === 'edit')
-  return { runs, edits, editorRuns, fills, files, clock, spawnCount: () => spawns }
+  return { runs, edits, editorRuns, fills, files, configPath, clock, spawnCount: () => spawns }
 }
 
 export async function open($: Engine, clock: { settle: () => Promise<void> }) {
-  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  await $.session.start({ cwd: CWD, surface: 'desktop', isInteractive: true })
   const answer = await $.command.run({
     command: 'backlog',
     args: '',
@@ -218,6 +272,10 @@ export async function openTask(ui: Drawing, id: string) {
     await (ui as BoardDrawing).post({ type: 'open', id }, { in: 'board' })
     return
   }
-  if (!(await ui.find({ key: `task:${id}` }))) await ui.press({ key: 'toggle-done' })
+  // Unfold the folded groups (the final status, closed ones) until it shows.
+  for (const toggle of await ui.findAll({ type: 'Button', key: undefined })) {
+    if (await ui.find({ key: `task:${id}` })) break
+    if (toggle.key?.startsWith('toggle:')) await ui.press({ key: toggle.key })
+  }
   await ui.press({ key: `task:${id}` })
 }

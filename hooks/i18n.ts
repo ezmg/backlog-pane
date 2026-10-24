@@ -86,6 +86,35 @@ const en = {
   editorWaiting: 'Waiting for the editor. Save and close the file to apply the change.',
   noEditor: 'No editor is set. Run `backlog config set defaultEditor "code --wait"`, or set VISUAL or EDITOR.',
   editorFailed: (detail: string) => `The editor did not finish: ${detail}`,
+
+  manageStatuses: 'Statuses…',
+  statusesTitle: 'Statuses',
+  taskCount: (n: number) => (n === 0 ? 'no tasks' : `${n} ${plural(n, 'task', 'tasks')}`),
+  finalTag: 'final',
+  closedTag: 'closed',
+  defaultTag: 'new tasks start here',
+  newStatus: 'New status name',
+  position: 'Position',
+  atStart: 'At the start',
+  after: (status: string) => `After ${status}`,
+  statusAdded: (status: string) => `Added the status ${status}.`,
+  statusRemoved: (status: string) => `Deleted the status ${status}.`,
+  confirmRemoveStatus: (status: string) => `Delete the status ${status}?`,
+  statusProblem: {
+    empty: 'Type a name for the status.',
+    comma: 'A status name cannot hold a comma, a quote or a line break.',
+    duplicate: 'There is already a status with that name.',
+    'too-long': 'A status name can be 40 characters at most.',
+  } as Record<string, string>,
+  cannotRemoveDefault: (status: string) =>
+    `${status} is the status new tasks start in. Change it first with \`backlog config set defaultStatus <status>\`.`,
+  cannotRemoveLast: 'A project needs at least two statuses.',
+  configNotFound: 'Could not find the Backlog.md config (backlog/config.yml).',
+  configUnreadable: 'The config has no statuses line the pane can rewrite. Edit it by hand.',
+  configMismatch: 'Backlog.md did not read the new statuses, so the config was put back as it was.',
+  statusesNote:
+    'Backlog.md has no command to change statuses, so the pane rewrites only the statuses line of its config and then checks that Backlog.md reads it. Task counts leave out drafts and archived tasks.',
+  closedHint: 'To fold a status and leave it out of ◀/▶, add it to the plugin option closedStatuses.',
 }
 
 export type Strings = typeof en
@@ -168,6 +197,35 @@ const es: Strings = {
   editorWaiting: 'Esperando al editor. Guarda y cierra el archivo para aplicar el cambio.',
   noEditor: 'No hay ningún editor configurado. Ejecuta `backlog config set defaultEditor "code --wait"`, o define VISUAL o EDITOR.',
   editorFailed: detail => `El editor no terminó: ${detail}`,
+
+  manageStatuses: 'Estados…',
+  statusesTitle: 'Estados',
+  taskCount: n => (n === 0 ? 'sin tareas' : `${n} ${plural(n, 'tarea', 'tareas')}`),
+  finalTag: 'final',
+  closedTag: 'cerrado',
+  defaultTag: 'las tareas nuevas empiezan aquí',
+  newStatus: 'Nombre del nuevo estado',
+  position: 'Posición',
+  atStart: 'Al principio',
+  after: status => `Después de ${status}`,
+  statusAdded: status => `Estado ${status} añadido.`,
+  statusRemoved: status => `Estado ${status} eliminado.`,
+  confirmRemoveStatus: status => `¿Eliminar el estado ${status}?`,
+  statusProblem: {
+    empty: 'Escribe un nombre para el estado.',
+    comma: 'El nombre de un estado no puede tener comas, comillas ni saltos de línea.',
+    duplicate: 'Ya hay un estado con ese nombre.',
+    'too-long': 'El nombre de un estado puede tener 40 caracteres como máximo.',
+  },
+  cannotRemoveDefault: status =>
+    `${status} es el estado en el que empiezan las tareas nuevas. Cámbialo antes con \`backlog config set defaultStatus <estado>\`.`,
+  cannotRemoveLast: 'Un proyecto necesita al menos dos estados.',
+  configNotFound: 'No se encontró la configuración de Backlog.md (backlog/config.yml).',
+  configUnreadable: 'La configuración no tiene una línea de estados que el panel pueda reescribir. Edítala a mano.',
+  configMismatch: 'Backlog.md no leyó los estados nuevos, así que la configuración se dejó como estaba.',
+  statusesNote:
+    'Backlog.md no tiene un comando para cambiar los estados, así que el panel reescribe solo la línea de estados de su configuración y después comprueba que Backlog.md la lee. Los recuentos no incluyen borradores ni tareas archivadas.',
+  closedHint: 'Para plegar un estado y que ◀/▶ se lo salte, añádelo a la opción closedStatuses del plugin.',
 }
 
 const tables: Record<Language, Strings> = { en, es }

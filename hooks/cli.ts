@@ -20,6 +20,7 @@ export const args = {
   create: (title: string) => ['task', 'create', title],
   priorities: () => ['config', 'get', 'priorities'],
   defaultEditor: () => ['config', 'get', 'defaultEditor'],
+  defaultStatus: () => ['config', 'get', 'defaultStatus'],
   setDescription: (id: string, text: string) => ['task', 'edit', id, '-d', text],
   setPlan: (id: string, text: string) => ['task', 'edit', id, '--plan', text],
   setTitle: (id: string, title: string) => ['task', 'edit', id, '-t', title],
@@ -283,30 +284,52 @@ export type Group = {
   tasks: TaskSummary[]
   total: number
   isFinal: boolean
+  /** Listed in the `closedStatuses` option: shown dim and folded, as the final one. */
+  isClosed: boolean
   color: ThemeKey
 }
 
 const recency = (task: TaskSummary) => task.updatedAt ?? task.createdAt ?? ''
 
+/** The `closedStatuses` option: status names separated by commas. */
+export function parseClosed(option: unknown): string[] {
+  if (typeof option !== 'string') return []
+  return option
+    .split(',')
+    .map(one => one.trim())
+    .filter(one => one !== '')
+}
+
+/** Whether `status` is one of `closed`, whatever the case. */
+export const isClosedStatus = (status: string, closed: readonly string[]) =>
+  closed.some(one => one.toLowerCase() === status.trim().toLowerCase())
+
 /**
  * Groups tasks by status in the configured order, statuses the config does
- * not list after it. The final status (the config's last) keeps only its
- * `doneLimit` most recently changed tasks; `total` still counts them all.
+ * not list after it. The final status (the config's last) and the closed
+ * ones keep only their `doneLimit` most recently changed tasks; `total`
+ * still counts them all.
  */
-export function groupTasks(tasks: TaskSummary[], statuses: string[], doneLimit: number): Group[] {
+export function groupTasks(
+  tasks: TaskSummary[],
+  statuses: string[],
+  doneLimit: number,
+  closed: readonly string[] = [],
+): Group[] {
   const order = statuses.length > 0 ? statuses : DEFAULT_STATUSES
   const final = order[order.length - 1]
   const names = [...order]
   for (const task of tasks) if (!names.includes(task.status)) names.push(task.status)
-  const colors = statusColors(names, final ?? '')
+  const colors = statusColors(names, final ?? '', closed)
   return names.map(status => {
     let list = tasks.filter(task => task.status === status)
     const total = list.length
     const isFinal = status === final
-    if (isFinal) {
+    const isClosed = !isFinal && isClosedStatus(status, closed)
+    if (isFinal || isClosed) {
       list = [...list].sort((a, b) => recency(b).localeCompare(recency(a))).slice(0, Math.max(0, doneLimit))
     }
-    return { status, tasks: list, total, isFinal, color: colors.get(status) ?? 'text' }
+    return { status, tasks: list, total, isFinal, isClosed, color: colors.get(status) ?? 'text' }
   })
 }
 
@@ -315,28 +338,122 @@ const IN_PROGRESS = /in[ -]?progress|en (curso|progreso)|doing|wip/i
 
 /**
  * Each status's colour, by theme key so it follows the person's light or
- * dark theme: the first status `suggestion`, one named like "In Progress"
- * `warning`, the final one `success`, the others in turn from ROTATION.
- * `names` is every status shown, in order; `final` the configured last.
+ * dark theme: the final one `success`, closed ones `inactive`, one named
+ * like "In Progress" `warning`, the first of the rest `suggestion`, and the
+ * others in turn from ROTATION. `names` is every status shown, in order;
+ * `final` the configured last.
  */
-export function statusColors(names: string[], final: string): Map<string, ThemeKey> {
+export function statusColors(names: string[], final: string, closed: readonly string[] = []): Map<string, ThemeKey> {
   const colors = new Map<string, ThemeKey>()
   let turn = 0
-  names.forEach((name, i) => {
+  let isFirstOpen = true
+  for (const name of names) {
     if (name === final) colors.set(name, 'success')
+    else if (isClosedStatus(name, closed)) colors.set(name, 'inactive')
     else if (IN_PROGRESS.test(name)) colors.set(name, 'warning')
-    else if (i === 0) colors.set(name, 'suggestion')
+    else if (isFirstOpen) colors.set(name, 'suggestion')
     else colors.set(name, ROTATION[turn++ % ROTATION.length] ?? 'permission')
-  })
+    if (name !== final && !isClosedStatus(name, closed)) isFirstOpen = false
+  }
   return colors
 }
 
-/** The statuses before and after `status` in `order`, where there are any. */
-export function neighbours(order: string[], status: string): { previous?: string; next?: string } {
+/**
+ * The statuses ◀ and ▶ lead to from `status`: the nearest ones before and
+ * after it in `order` that are not closed. A closed status is never one,
+ * but a task in a closed status still moves to the open ones beside it.
+ */
+export function neighbours(
+  order: string[],
+  status: string,
+  closed: readonly string[] = [],
+): { previous?: string; next?: string } {
   const i = order.indexOf(status)
   if (i === -1) return {}
-  return { previous: order[i - 1], next: order[i + 1] }
+  const final = order[order.length - 1]
+  const isOpen = (name: string) => name === final || !isClosedStatus(name, closed)
+  const previous = [...order.slice(0, i)].reverse().find(isOpen)
+  const next = order.slice(i + 1).find(isOpen)
+  return { previous, next }
 }
+
+/**
+ * Where Backlog.md keeps its config, as it looks for it: in each folder
+ * from `cwd` up, `backlog.config.yml`, then `backlog/` or `.backlog/`
+ * holding `config.yml` (or `.yaml`). Nearest first, `levels` folders up at
+ * most; absolute when `cwd` is (POSIX or Windows), else relative.
+ */
+export function configCandidates(cwd = '', levels = 12): string[] {
+  const names = [
+    'backlog.config.yml',
+    'backlog.config.yaml',
+    'backlog/config.yml',
+    'backlog/config.yaml',
+    '.backlog/config.yml',
+    '.backlog/config.yaml',
+  ]
+  const sep = /^[A-Za-z]:\\|\\/.test(cwd) && !cwd.includes('/') ? '\\' : '/'
+  const root = cwd.startsWith('/') ? '/' : ''
+  const parts = cwd.split(/[\\/]+/).filter(part => part !== '')
+  const folders: string[] = []
+  if (parts.length === 0 && root === '') {
+    for (let up = 0; up <= levels; up++) folders.push('../'.repeat(up))
+  } else {
+    for (let n = parts.length; n >= 0 && folders.length <= levels; n--) {
+      const folder = root + parts.slice(0, n).join(sep)
+      // A Windows drive alone (`C:`) is its root, `C:\\`.
+      if (folder === '' && root === '') break
+      folders.push(folder === root ? root : `${folder}${sep}`)
+    }
+  }
+  return folders.flatMap(folder => names.map(name => `${folder}${sep === '/' ? name : name.replace(/\//g, sep)}`))
+}
+
+/**
+ * The config's text with its `statuses` replaced by `statuses`, as one
+ * flow list (`statuses: ["To Do", "Done"]`, the form `backlog init`
+ * writes); a block list (`statuses:` then `- To Do` lines) is replaced the
+ * same way. Every other line is kept as it was, line endings included.
+ * Undefined when the text has no top-level `statuses` key, or has several.
+ */
+export function rewriteStatuses(config: string, statuses: string[]): string | undefined {
+  const eol = config.includes('\r\n') ? '\r\n' : '\n'
+  const lines = config.split(/\r?\n/)
+  const at = lines.flatMap((line, i) => (/^statuses\s*:/.test(line) ? [i] : []))
+  if (at.length !== 1) return undefined
+  const start = at[0] ?? 0
+  const rest = (lines[start] ?? '').replace(/^statuses\s*:/, '').trim()
+  let end = start + 1
+  if (rest === '' || rest.startsWith('#')) {
+    // A block list: the indented `- item` lines (and blank lines) under it.
+    while (end < lines.length && /^(\s+-\s|\s*$)/.test(lines[end] ?? '')) end++
+    while (end > start + 1 && (lines[end - 1] ?? '').trim() === '') end--
+  } else if (!rest.startsWith('[')) {
+    return undefined
+  }
+  const line = `statuses: [${statuses.map(one => JSON.stringify(one)).join(', ')}]`
+  return [...lines.slice(0, start), line, ...lines.slice(end)].join(eol)
+}
+
+export type StatusProblem = 'empty' | 'comma' | 'duplicate' | 'too-long'
+
+/**
+ * Why `name` cannot be a new status, if it cannot: empty, holding a comma
+ * or a quote (`backlog config get statuses` joins them with commas), the
+ * same as one there (whatever the case), or longer than 40 characters.
+ */
+export function statusProblem(name: string, statuses: readonly string[]): StatusProblem | undefined {
+  const trimmed = name.trim()
+  if (trimmed === '') return 'empty'
+  if (/[,"\n\r]/.test(trimmed)) return 'comma'
+  if (trimmed.length > 40) return 'too-long'
+  if (statuses.some(one => one.toLowerCase() === trimmed.toLowerCase())) return 'duplicate'
+  return undefined
+}
+
+/** The same lists, compared name by name. */
+export const sameStatuses = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((one, i) => one === b[i])
 
 /** Whether a task's priority is high, which the pane marks with "!". */
 export const isHighPriority = (priority: string | null | undefined) => priority?.trim().toLowerCase() === 'high'
