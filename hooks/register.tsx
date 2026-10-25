@@ -37,7 +37,8 @@ import {
   statusProblem,
   summarize,
 } from './cli'
-import { detectLanguage, strings } from './i18n'
+import { detectLanguage, strings, wordsFor } from './i18n'
+import * as jira from './jira'
 import {
   PAGE,
   defaultPriorityMap,
@@ -53,11 +54,13 @@ import {
   readIssues,
   readPriorities,
   readStatuses,
+  redmineStatusFor,
   toRemoteItem,
   urls as redmineUrls,
 } from './redmine'
+import type { RedminePriority, RedmineStatus } from './redmine'
 import { EMPTY_SYNC, needsRead, othersTasks, plan, readSyncStore } from './sync'
-import type { Action, LocalItem } from './sync'
+import type { Action, Change, LocalItem } from './sync'
 import { decodeText, fromBase64, prioritiesOf, readExport, refFor, statusesOf, toRemoteRow } from './csv'
 import type { Language, Strings } from './i18n'
 
@@ -111,6 +114,8 @@ let doneLimit = 5
 let closedOption: string[] = []
 // The redmineApiKey option (secure storage), sent in the X-Redmine-API-Key header only.
 let redmineKey = ''
+let jiraEmail = ''
+let jiraToken = ''
 // The automatic sync while the pane is open, and whether a sync runs now.
 let syncTimer: { cancel: () => void } | null = null
 let isSyncRunning = false
@@ -284,9 +289,10 @@ async function runSync($: Engine) {
   const view = await read($, sync)
   const settings = view.settings
   if (!settings || isSyncRunning) return
-  const t = await text($)
+  const t = wordsFor(await text($), settings.provider)
   const base = normalizeUrl(settings.url)
   const isCsv = settings.provider === 'csv'
+  const isJira = settings.provider === 'jira'
   const problem = isCsv
     ? !settings.file.trim()
       ? t.badFile
@@ -295,9 +301,11 @@ async function runSync($: Engine) {
       ? t.badUrl
       : !settings.project.trim()
         ? t.badProject
-        : !redmineKey
+        : !(isJira ? jiraToken : redmineKey)
           ? t.apiKeyMissing
-          : null
+          : isJira && jira.isCloud(base) && !jiraEmail
+            ? t.emailMissing
+            : null
   if (problem || (!isCsv && !base)) {
     await update($, notice, () => problem ?? t.badUrl)
     return
@@ -305,7 +313,11 @@ async function runSync($: Engine) {
   isSyncRunning = true
   await update($, sync, now => ({ ...now, isSyncing: true }))
   try {
-    const failed = isCsv ? await syncCsv($, settings, base, t) : await syncOnce($, settings, base ?? '', t)
+    const failed = isCsv
+      ? await syncCsv($, settings, base, t)
+      : isJira
+        ? await syncJira($, settings, base ?? '', t)
+        : await syncOnce($, settings, base ?? '', t)
     if (failed) {
       await saveSync($, now => ({ settings: now.settings, data: { ...now.data, lastError: failed } }))
       await update($, notice, () => failed)
@@ -367,6 +379,201 @@ async function applyLocal(
   if (old) links[action.key] = old
   warnings.push(t.localFailed(action.taskId, errorLine(run.stderr, '?')))
   return false
+}
+
+/** One request to Jira with the token; a request that cannot go out is status 0. */
+async function jiraCall($: Engine, base: string, method: string, url: string, body?: unknown): Promise<Http> {
+  try {
+    const answer = await $.http.fetch(url, {
+      method,
+      headers: jira.headers(base, jiraEmail, jiraToken, body !== undefined),
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+    return { ok: answer.ok, status: answer.status, text: answer.text }
+  } catch (error) {
+    return { ok: false, status: 0, text: String(error) }
+  }
+}
+
+function jiraProblem(t: Strings, answer: Http, project: string): string {
+  if (answer.status === 0) return t.unreachable(errorLine(answer.text, '?'))
+  if (answer.status === 401) return t.unauthorized
+  if (answer.status === 403) return t.forbidden
+  if (answer.status === 404) return t.noProject(project)
+  return t.unexpected(jira.readError(answer.status, answer.text))
+}
+
+/**
+ * Sends a change to a Jira issue: its fields by a PUT, its status by the
+ * workflow's transition to it, if one is open from where the issue is.
+ * Answers whether anything was sent, and what could not be.
+ */
+async function pushJira(
+  $: Engine,
+  base: string,
+  key: string,
+  taskId: string,
+  change: Change,
+  maps: { status: Record<string, string>; priority: Record<string, string> },
+  lists: { statuses: RedmineStatus[]; priorities: RedminePriority[] },
+  current: { statusId?: number | string; priorityId?: number | string | null } | undefined,
+  t: Strings,
+): Promise<{ isSent: boolean; failed: string[]; warnings: string[] }> {
+  const failed: string[] = []
+  const warnings: string[] = []
+  let isSent = false
+  const body = jira.fieldsBody(change, maps.priority, lists.priorities, current?.priorityId === undefined ? undefined : String(current.priorityId))
+  for (const field of body.skipped) {
+    failed.push(field)
+    warnings.push(t.priorityNotSent(taskId, change.priority ?? ''))
+  }
+  if (Object.keys(body.fields).length > 0) {
+    const answer = await jiraCall($, base, 'PUT', jira.urls.issue(base, key), { fields: body.fields })
+    if (answer.ok) isSent = true
+    else {
+      failed.push(...Object.keys(change).filter(field => field !== 'status'))
+      warnings.push(t.refused(key, answer.status === 0 ? errorLine(answer.text, '?') : jira.readError(answer.status, answer.text)))
+    }
+  }
+  if (change.status !== undefined) {
+    const target = redmineStatusFor(change.status, maps.status, lists.statuses, current?.statusId)
+    if (target === undefined) {
+      failed.push('status')
+      warnings.push(t.statusNotSent(taskId, change.status))
+    } else if (String(target) !== String(current?.statusId)) {
+      const open = await jiraCall($, base, 'GET', jira.urls.transitions(base, key))
+      const transition = open.ok ? jira.readTransitions(open.text).find(one => one.to === String(target)) : undefined
+      if (!transition) {
+        failed.push('status')
+        warnings.push(t.noTransition(taskId, change.status))
+      } else {
+        const moved = await jiraCall($, base, 'POST', jira.urls.transitions(base, key), { transition: { id: transition.id } })
+        if (moved.ok) isSent = true
+        else {
+          failed.push('status')
+          warnings.push(t.refused(key, moved.status === 0 ? errorLine(moved.text, '?') : jira.readError(moved.status, moved.text)))
+        }
+      }
+    }
+  }
+  return { isSent, failed, warnings }
+}
+
+/** One sync with Jira; answers what went wrong, if it could not run. */
+async function syncJira($: Engine, settings: SyncSettings, base: string, t: Strings): Promise<string | undefined> {
+  const project = jira.projectKey(settings.project)
+  const found = await jiraCall($, base, 'GET', jira.urls.project(base, project))
+  if (!found.ok) return jiraProblem(t, found, project)
+  const types = jira.readIssueTypes(found.text) ?? []
+  const statusAnswer = await jiraCall($, base, 'GET', jira.urls.statuses(base, project))
+  const remoteStatuses = statusAnswer.ok ? jira.readStatuses(statusAnswer.text) : undefined
+  if (!remoteStatuses) return statusAnswer.ok ? t.unexpected('statuses') : jiraProblem(t, statusAnswer, project)
+  const priorityAnswer = await jiraCall($, base, 'GET', jira.urls.priorities(base))
+  const remotePriorities = (priorityAnswer.ok ? jira.readPriorities(priorityAnswer.text) : undefined) ?? []
+  const issues: jira.JiraIssue[] = []
+  const query = jira.jql(project, settings.onlyMine)
+  for (let page: jira.Page | undefined = {}; page; ) {
+    const answer = await jiraCall($, base, 'GET', jira.urls.search(base, query, page))
+    const read = answer.ok ? jira.readSearch(answer.text) : undefined
+    if (!read) return answer.ok ? t.unexpected('search') : jiraProblem(t, answer, project)
+    issues.push(...read.issues)
+    page = read.next
+  }
+
+  const order = await read($, statuses)
+  const levels = await read($, priorities)
+  const statusMap = { ...defaultStatusMap(remoteStatuses, order), ...settings.statusMap }
+  const priorityMap = { ...defaultPriorityMap(remotePriorities, levels), ...settings.priorityMap }
+
+  const data = (await read($, sync)).data
+  const remote = issues.map(issue => jira.toRemoteIssue(base, issue, statusMap, priorityMap, order[0] ?? ''))
+  const local = await readLocal($, data, new Set(remote.map(item => item.url)))
+  if (typeof local === 'string') return local || t.listFailed
+  const planned = plan({
+    remote,
+    local,
+    links: data.links,
+    conflicts: data.conflicts,
+    mode: settings.mode,
+    excluded: settings.excluded,
+    createsRemote: true,
+    ownsRef: ref => jira.issueKeyOf(base, ref) !== undefined,
+  })
+
+  const myself = await jiraCall($, base, 'GET', jira.urls.myself(base))
+  const me = myself.ok ? jira.readMyself(myself.text) : undefined
+  const meta = Object.fromEntries(
+    issues.map(issue => [issue.key, { statusId: issue.statusId, priorityId: issue.priorityId, assigneeId: issue.assigneeId }]),
+  )
+  const maps = { status: statusMap, priority: priorityMap }
+  const lists = { statuses: remoteStatuses, priorities: remotePriorities }
+  const links = { ...planned.links }
+  const warnings: string[] = []
+  let fromRemote = 0
+  let toRemote = 0
+  for (const action of planned.actions) {
+    if (action.kind === 'create-local' || action.kind === 'update-local') {
+      if (await applyLocal($, action, links, data, warnings, t)) fromRemote++
+    } else if (action.kind === 'update-remote') {
+      const old = data.links[action.key]?.base
+      const link = links[action.key]
+      const pushed = await pushJira($, base, action.key, action.taskId, action.change, maps, lists, meta[action.key], t)
+      warnings.push(...pushed.warnings)
+      // What did not go keeps the old base, so it is tried again next time.
+      if (old && link) for (const field of pushed.failed) link.base = { ...link.base, [field]: old[field as keyof typeof old] }
+      if (pushed.isSent) toRemote++
+    } else {
+      if (settings.onlyMine && me === undefined) {
+        warnings.push(t.noMe(action.taskId))
+        continue
+      }
+      const type = jira.issueTypeFor(types, settings.issueType)
+      const run = await backlog($, args.view(action.taskId))
+      const detail = run.ok ? readTaskView(safeParse(run.stdout)) : undefined
+      const fields = { ...action.fields, description: detail?.description ?? '' }
+      const body = jira.fieldsBody({ title: fields.title, description: fields.description, priority: fields.priority }, priorityMap, remotePriorities)
+      const answer = await jiraCall($, base, 'POST', jira.urls.create(base), {
+        fields: {
+          project: { key: project },
+          ...(type ? { issuetype: { id: type.id } } : {}),
+          ...body.fields,
+          ...(settings.onlyMine && me !== undefined ? { assignee: jira.assigneeField(base, me) } : {}),
+        },
+      })
+      const key = answer.ok ? jira.readCreated(answer.text) : undefined
+      if (key === undefined) {
+        warnings.push(t.refused(action.taskId, answer.status === 0 ? errorLine(answer.text, '?') : jira.readError(answer.status, answer.text)))
+        continue
+      }
+      await backlog($, args.addRef(action.taskId, jira.browseUrl(base, key)))
+      // A new issue starts in its workflow's first status: move it on to the task's.
+      const created = await jiraCall($, base, 'GET', jira.urls.issueStatus(base, key))
+      const statusId = created.ok ? jira.readIssueStatus(created.text) : undefined
+      const moved = await pushJira($, base, key, action.taskId, { status: fields.status }, maps, lists, { statusId }, t)
+      warnings.push(...moved.warnings)
+      links[key] = { taskId: action.taskId, base: moved.failed.includes('status') && statusId ? { ...fields, status: statusMap[statusId] ?? fields.status } : fields }
+      meta[key] = { statusId: statusId ?? '', priorityId: null, assigneeId: settings.onlyMine ? (me ?? null) : null }
+      toRemote++
+    }
+  }
+
+  const now = new Date(await $.clock.now()).toISOString()
+  await saveSync($, current => ({
+    settings: current.settings ? { ...current.settings, statusMap, priorityMap } : current.settings,
+    data: {
+      links,
+      conflicts: planned.conflicts,
+      meta,
+      me: me === undefined ? data.me : [me],
+      issueTypes: types,
+      statuses: remoteStatuses,
+      priorities: remotePriorities,
+      lastSync: now,
+      warnings,
+    },
+  }))
+  await update($, notice, () => t.syncDone({ fromRemote, toRemote, conflicts: planned.conflicts.length }))
+  return undefined
 }
 
 /** The CSV's path as $.fs takes it: `~` is the home folder. */
@@ -580,9 +787,9 @@ function stopSyncTimer() {
 
 /** Settles one conflict: the side picked gives its value to the other. */
 async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote' | 'local') {
-  const t = await text($)
   const view = await read($, sync)
   const settings = view.settings
+  const t = wordsFor(await text($), settings?.provider)
   const base = settings ? normalizeUrl(settings.url) : undefined
   const isCsv = settings?.provider === 'csv'
   if (!settings || (!base && !isCsv)) return
@@ -591,6 +798,22 @@ async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote'
     const run = await backlog($, args.editFields(conflict.taskId, { [conflict.field]: value ?? '' }))
     if (!run.ok) {
       await update($, notice, () => t.localFailed(conflict.taskId, errorLine(run.stderr, '?')))
+      return
+    }
+  } else if (settings.provider === 'jira' && base) {
+    const pushed = await pushJira(
+      $,
+      base,
+      conflict.key,
+      conflict.taskId,
+      { [conflict.field]: value ?? '' },
+      { status: settings.statusMap, priority: settings.priorityMap },
+      { statuses: view.data.statuses, priorities: view.data.priorities },
+      view.data.meta[conflict.key],
+      t,
+    )
+    if (pushed.failed.length > 0) {
+      await update($, notice, () => pushed.warnings[0] ?? null)
       return
     }
   } else if (!isCsv && base) {
@@ -625,13 +848,14 @@ async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote'
 }
 
 /**
- * Picks the tracker. Redmine starts read only, every 5 minutes, the tasks
- * there now kept out; a CSV is read only, read with the button. Switching
- * between them keeps the links (both name issues by number) but not the
- * mappings (Redmine's go by id, a CSV's by name).
+ * Picks the tracker. Redmine and Jira start read only, every 5 minutes, the
+ * tasks there now kept out; a CSV is read only, read with the button.
+ * Switching keeps no mappings (Redmine's go by id, a CSV's by name), and
+ * keeps the links only between Redmine and its CSV, which both name issues
+ * by number; the tasks there now are kept out of the new tracker.
  */
 async function setTracker($: Engine, value: string) {
-  if (value !== 'redmine' && value !== 'csv') {
+  if (value !== 'redmine' && value !== 'jira' && value !== 'csv') {
     stopSyncTimer()
     const t = await text($)
     await saveSync($, now => ({ settings: null, data: now.data }))
@@ -654,9 +878,19 @@ async function setTracker($: Engine, value: string) {
         intervalMin: isCsv ? 0 : 5,
         statusMap: {},
         priorityMap: {},
-        excluded: now.settings?.excluded ?? existing,
+        excluded: existing,
       },
-      data: { ...now.data, meta: {}, me: undefined, statuses: [], priorities: [], warnings: [], lastError: undefined },
+      data: {
+        ...now.data,
+        links: (now.settings?.provider === 'jira') === (value === 'jira') ? now.data.links : {},
+        conflicts: [],
+        meta: {},
+        me: undefined,
+        statuses: [],
+        priorities: [],
+        warnings: [],
+        lastError: undefined,
+      },
     }
   })
   // A CSV has no timer; Redmine's starts with the pane's watch, or now if it runs.
@@ -1171,6 +1405,8 @@ export const register: Register = (on, options) => {
   doneLimit = typeof options.doneLimit === 'number' ? options.doneLimit : 5
   closedOption = parseClosed(options.closedStatuses)
   redmineKey = typeof options.redmineApiKey === 'string' ? options.redmineApiKey.trim() : ''
+  jiraEmail = typeof options.jiraEmail === 'string' ? options.jiraEmail.trim() : ''
+  jiraToken = typeof options.jiraApiToken === 'string' ? options.jiraApiToken.trim() : ''
   languageOption = options.language
   language = null
 
@@ -1338,8 +1574,12 @@ export const register: Register = (on, options) => {
       const levels = await read($, priorities)
       const close = () => update($, isManagingSync, () => false)
       const isCsv = settings?.provider === 'csv'
+      const isJira = settings?.provider === 'jira'
+      const w = wordsFor(t, settings?.provider)
+      const needsEmail = isJira && !!settings && jira.isCloud(settings.url) && !jiraEmail
+      const hasKey = isJira ? !!jiraToken && !needsEmail : !!redmineKey
       const trackerName = (provider: string | undefined) =>
-        provider === 'csv' ? t.trackerCsv : provider === 'redmine' ? t.trackerRedmine : t.noTracker
+        provider === 'csv' ? t.trackerCsv : provider === 'jira' ? t.trackerJira : provider === 'redmine' ? t.trackerRedmine : t.noTracker
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" gap={1}>
@@ -1355,6 +1595,7 @@ export const register: Register = (on, options) => {
               options={[
                 { value: 'none', label: t.noTracker },
                 { value: 'redmine', label: t.trackerRedmine },
+                { value: 'jira', label: t.trackerJira },
                 { value: 'csv', label: t.trackerCsv },
               ]}
               onSelect={value => setTracker($, value)}
@@ -1379,7 +1620,7 @@ export const register: Register = (on, options) => {
                   <Input
                     key="sync-url"
                     label={t.csvUrl}
-                    placeholder={t.urlPlaceholder}
+                    placeholder={w.urlPlaceholder}
                     value={settings.url}
                     submitLabel={t.save}
                     onSubmit={value => setSyncSettings($, { url: value })}
@@ -1390,26 +1631,26 @@ export const register: Register = (on, options) => {
                 <Box flexDirection="column">
                   <Input
                     key="sync-url"
-                    label={t.redmineUrl}
-                    placeholder={t.urlPlaceholder}
+                    label={w.redmineUrl}
+                    placeholder={w.urlPlaceholder}
                     value={settings.url}
                     submitLabel={t.save}
                     onSubmit={value => setSyncSettings($, { url: value })}
                   />
                   <Input
                     key="sync-project"
-                    label={t.redmineProject}
-                    placeholder={t.projectPlaceholder}
+                    label={w.redmineProject}
+                    placeholder={w.projectPlaceholder}
                     value={settings.project}
                     submitLabel={t.save}
-                    onSubmit={value => setSyncSettings($, { project: value.trim() })}
+                    onSubmit={value => setSyncSettings($, { project: isJira ? jira.projectKey(value) : value.trim() })}
                   />
                   <Select
                     key="sync-mode"
                     label={t.mode}
                     value={settings.mode}
                     options={[
-                      { value: 'read', label: t.modeRead },
+                      { value: 'read', label: w.modeRead },
                       { value: 'both', label: t.modeBoth },
                     ]}
                     onSelect={value => setSyncSettings($, { mode: value === 'both' ? 'both' : 'read' })}
@@ -1434,6 +1675,18 @@ export const register: Register = (on, options) => {
                     ]}
                     onSelect={value => setSyncSettings($, { intervalMin: Number(value) })}
                   />
+                  {isJira && settings.mode === 'both' && (data.issueTypes ?? []).length > 0 ? (
+                    <Select
+                      key="sync-issue-type"
+                      label={t.issueType}
+                      value={settings.issueType ?? ''}
+                      options={[
+                        { value: '', label: t.issueTypeAuto },
+                        ...(data.issueTypes ?? []).map(type => ({ value: type.id, label: type.name })),
+                      ]}
+                      onSelect={value => setSyncSettings($, { issueType: value })}
+                    />
+                  ) : null}
                 </Box>
               ) : null}
               {isCsv ? (
@@ -1449,8 +1702,8 @@ export const register: Register = (on, options) => {
               {isCsv ? (
                 <Text dimColor>{t.csvHow}</Text>
               ) : (
-                <Text dimColor={!!redmineKey} color={redmineKey ? undefined : 'warning'}>
-                  {redmineKey ? t.apiKeySet : t.apiKeyMissing}
+                <Text dimColor={hasKey} color={hasKey ? undefined : 'warning'}>
+                  {hasKey ? w.apiKeySet : needsEmail && jiraToken ? t.emailMissing : w.apiKeyMissing}
                 </Text>
               )}
               <Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -1476,13 +1729,13 @@ export const register: Register = (on, options) => {
                     <Box flexDirection="column">
                       <Text>{t.conflictLine(conflict.taskId, t.fieldNames[conflict.field] ?? conflict.field)}</Text>
                       <Text dimColor>
-                        {isCsv ? t.inFile : t.inRedmine}: {conflict.remote?.trim() ? conflict.remote : t.empty}
+                        {isCsv ? t.inFile : w.inRedmine}: {conflict.remote?.trim() ? conflict.remote : t.empty}
                       </Text>
                       <Text dimColor>
                         {t.inBacklog}: {conflict.local?.trim() ? conflict.local : t.empty}
                       </Text>
                       <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                        <Button key={`conflict-remote-${i}`} label={isCsv ? t.useFile : t.useRemote} onPress={() => resolveConflict($, conflict, 'remote')} />
+                        <Button key={`conflict-remote-${i}`} label={isCsv ? t.useFile : w.useRemote} onPress={() => resolveConflict($, conflict, 'remote')} />
                         <Button key={`conflict-local-${i}`} label={t.useLocal} onPress={() => resolveConflict($, conflict, 'local')} />
                       </Box>
                     </Box>
@@ -1491,13 +1744,13 @@ export const register: Register = (on, options) => {
               ) : null}
               {settings.mode === 'both' && settings.excluded.length > 0 ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                  <Text dimColor>{t.excludedNote(settings.excluded.length)}</Text>
+                  <Text dimColor>{w.excludedNote(settings.excluded.length)}</Text>
                   <Button key="sync-include-old" plain label={t.includeOld} onPress={() => setSyncSettings($, { excluded: [] })} />
                 </Box>
               ) : null}
               {Select && data.statuses.length > 0 ? (
                 <Box flexDirection="column">
-                  <Text bold>{t.statusMapping}</Text>
+                  <Text bold>{w.statusMapping}</Text>
                   {data.statuses.map(status => (
                     <Select
                       key={`sync-status-${status.id}`}
@@ -1513,7 +1766,7 @@ export const register: Register = (on, options) => {
               ) : null}
               {Select && data.priorities.length > 0 ? (
                 <Box flexDirection="column">
-                  <Text bold>{t.priorityMapping}</Text>
+                  <Text bold>{w.priorityMapping}</Text>
                   {data.priorities.map(priority => (
                     <Select
                       key={`sync-priority-${priority.id}`}
@@ -1531,7 +1784,7 @@ export const register: Register = (on, options) => {
                 </Box>
               ) : null}
               {data.statuses.length === 0 ? <Text dimColor>{t.mappingLater}</Text> : null}
-              <Text dimColor>{isCsv ? t.csvNote : t.syncNote}</Text>
+              <Text dimColor>{isCsv ? t.csvNote : w.syncNote}</Text>
             </Box>
           ) : null}
         </Box>
@@ -1881,7 +2134,7 @@ export const register: Register = (on, options) => {
           <Box flexDirection="row" flexWrap="wrap" gap={1}>
             <Text dimColor color={synced.data.conflicts.length > 0 || synced.data.lastError ? 'warning' : undefined}>
               {t.syncLine(
-                synced.settings.provider === 'csv' ? 'CSV' : 'Redmine',
+                synced.settings.provider === 'csv' ? 'CSV' : synced.settings.provider === 'jira' ? 'Jira' : 'Redmine',
                 synced.settings.mode === 'both' ? t.bothShort : t.readOnlyShort,
                 syncTime,
                 synced.data.conflicts.length,

@@ -9,6 +9,40 @@ export type LanguageOption = 'auto' | Language
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many)
 
+
+/** What Jira changes in the integration's words, over Redmine's. */
+const enJira = {
+  redmineUrl: 'Jira URL',
+  urlPlaceholder: 'https://your-company.atlassian.net',
+  redmineProject: 'Project key',
+  projectPlaceholder: 'as in its issue keys, e.g. APP',
+  badProject: 'Type the project’s key, as in its issue keys (APP-12 → APP).',
+  modeRead: 'Read only (Jira → Backlog.md)',
+  apiKeySet: 'API token: set.',
+  apiKeyMissing:
+    'API token: missing. Set “Jira API token” in the plugin’s settings (/plugin, or /config), and for Jira Cloud also “Jira email”: Claude Code keeps the token in secure storage.',
+  statusMapping: 'Jira status → Backlog.md status',
+  priorityMapping: 'Jira priority → Backlog.md priority',
+  excludedNote: (n: number) =>
+    `${n} ${plural(n, 'task', 'tasks')} that existed before the sync ${plural(n, 'is', 'are')} not sent to Jira.`,
+  inRedmine: 'Jira',
+  useRemote: 'Use Jira’s',
+  syncDone: (n: { fromRemote: number; toRemote: number; conflicts: number }) =>
+    `Jira: ${n.fromRemote} from Jira, ${n.toRemote} to Jira, ${n.conflicts} ${plural(n.conflicts, 'conflict', 'conflicts')}.`,
+  unauthorized: 'Jira refused the email or the API token (401). Check them in the plugin’s settings.',
+  forbidden: 'Jira says this token may not do that (403).',
+  noProject: (project: string) => `Jira has no project “${project}” (404), or this token cannot see it.`,
+  unreachable: (detail: string) => `Could not reach Jira: ${detail}`,
+  unexpected: (detail: string) => `Jira answered something unexpected: ${detail}`,
+  statusNotSent: (task: string, status: string) => `${task}: no Jira status maps to “${status}”, so its status was not sent.`,
+  priorityNotSent: (task: string, priority: string) =>
+    `${task}: no Jira priority maps to “${priority}”, so its priority was not sent.`,
+  noMe: (task: string) => `${task} was not sent: Jira did not say who owns the API token, to assign it to.`,
+  refused: (issue: string, why: string) => `Jira refused the change to ${issue}: ${why}`,
+  syncNote:
+    'Issues are copied into Backlog.md as tasks (with the issue’s URL in their references) and kept in step field by field: title, status, priority and description. Read only never writes to Jira. Nothing is ever deleted on either side.',
+}
+
 const en = {
   paneTitle: 'Backlog',
   commandDescription: 'Open the Backlog.md board in a side pane',
@@ -218,9 +252,19 @@ const en = {
   localFailed: (task: string, why: string) => `${task} could not be updated: ${why}`,
   syncNote:
     'Issues are copied into Backlog.md as tasks (with the issue’s URL in their references) and kept in step field by field: title, status, priority and description. Read only never writes to Redmine. Nothing is ever deleted on either side.',
+  trackerJira: 'Jira (API)',
+  issueType: 'Issue type for new tasks',
+  issueTypeAuto: 'Task, or the first',
+  noTransition: (task: string, status: string) =>
+    `${task}: its Jira workflow has no transition to “${status}” from where the issue is, so its status was not sent.`,
+  emailMissing: 'Jira Cloud needs your account’s email too: set “Jira email” in the plugin’s settings.',
+  jira: enJira,
 }
 
 export type Strings = typeof en
+
+/** The strings for a tracker: Jira's words over Redmine's where they differ. */
+export const wordsFor = (t: Strings, provider: string | undefined): Strings => (provider === 'jira' ? { ...t, ...t.jira } : t)
 
 const es: Strings = {
   paneTitle: 'Backlog',
@@ -429,6 +473,43 @@ const es: Strings = {
   localFailed: (task, why) => `No se pudo actualizar ${task}: ${why}`,
   syncNote:
     'Las peticiones se copian en Backlog.md como tareas (con la URL de la petición en sus referencias) y se mantienen al día campo a campo: título, estado, prioridad y descripción. Solo lectura nunca escribe en Redmine. Nunca se borra nada en ningún lado.',
+  trackerJira: 'Jira (API)',
+  issueType: 'Tipo de incidencia para las tareas nuevas',
+  issueTypeAuto: 'Tarea, o la primera',
+  noTransition: (task, status) =>
+    `${task}: el flujo de trabajo de Jira no tiene transición a «${status}» desde donde está la incidencia, así que su estado no se envió.`,
+  emailMissing: 'Jira Cloud también necesita el email de tu cuenta: pon «Jira email» en los ajustes del plugin.',
+  jira: {
+    redmineUrl: 'URL de Jira',
+    urlPlaceholder: 'https://tu-empresa.atlassian.net',
+    redmineProject: 'Clave del proyecto',
+    projectPlaceholder: 'la de sus incidencias, p. ej. APP',
+    badProject: 'Escribe la clave del proyecto, la de sus incidencias (APP-12 → APP).',
+    modeRead: 'Solo lectura (Jira → Backlog.md)',
+    apiKeySet: 'Token de API: configurado.',
+    apiKeyMissing:
+      'Token de API: falta. Pon «Jira API token» en los ajustes del plugin (/plugin, o /config), y para Jira Cloud también «Jira email»: Claude Code guarda el token en el almacén seguro.',
+    statusMapping: 'Estado de Jira → estado de Backlog.md',
+    priorityMapping: 'Prioridad de Jira → prioridad de Backlog.md',
+    excludedNote: n =>
+      `${n} ${plural(n, 'tarea que ya existía', 'tareas que ya existían')} antes de la sincronización no se ${plural(n, 'envía', 'envían')} a Jira.`,
+    inRedmine: 'Jira',
+    useRemote: 'Usar el de Jira',
+    syncDone: n =>
+      `Jira: ${n.fromRemote} desde Jira, ${n.toRemote} a Jira, ${n.conflicts} ${plural(n.conflicts, 'conflicto', 'conflictos')}.`,
+    unauthorized: 'Jira rechazó el email o el token de API (401). Revísalos en los ajustes del plugin.',
+    forbidden: 'Jira dice que este token no puede hacer eso (403).',
+    noProject: project => `Jira no tiene el proyecto «${project}» (404), o este token no puede verlo.`,
+    unreachable: detail => `No se pudo conectar con Jira: ${detail}`,
+    unexpected: detail => `Jira respondió algo inesperado: ${detail}`,
+    statusNotSent: (task, status) => `${task}: ningún estado de Jira corresponde a «${status}», así que su estado no se envió.`,
+    priorityNotSent: (task, priority) =>
+      `${task}: ninguna prioridad de Jira corresponde a «${priority}», así que su prioridad no se envió.`,
+    noMe: task => `${task} no se envió: Jira no dijo de quién es el token de API, para asignársela.`,
+    refused: (issue, why) => `Jira rechazó el cambio en ${issue}: ${why}`,
+    syncNote:
+      'Las incidencias se copian en Backlog.md como tareas (con la URL de la incidencia en sus referencias) y se mantienen al día campo a campo: título, estado, prioridad y descripción. Solo lectura nunca escribe en Jira. Nunca se borra nada en ningún lado.',
+  },
 }
 
 const tables: Record<Language, Strings> = { en, es }
