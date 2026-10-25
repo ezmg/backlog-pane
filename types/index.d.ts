@@ -87,11 +87,22 @@ export type SyncConflict = {
   remote: string | null
 }
 
-/** How a project syncs with Redmine, as the person set it up in Integration…. */
-export type RedmineSettings = {
-  provider: 'redmine'
+/**
+ * Where a project's tasks come from: Redmine's API, or a CSV file Redmine
+ * exported (read only, read when the person presses Sync now).
+ */
+export type SyncProvider = 'redmine' | 'jira' | 'csv'
+
+/** How a project syncs, as the person set it up in Integration…. */
+export type SyncSettings = {
+  provider: SyncProvider
+  /** Redmine's URL: the API's, or (CSV) the one the tasks' references point at; optional for CSV. */
   url: string
   project: string
+  /** CSV: the exported file, absolute or relative to the session's folder. */
+  file: string
+  /** Jira: the issue type new tasks are created as (its id); '' picks Task, or the first. */
+  issueType?: string
   mode: SyncMode
   /** Only the issues assigned to the key's owner; new tasks sent to Redmine are assigned to them. */
   onlyMine: boolean
@@ -99,7 +110,7 @@ export type RedmineSettings = {
   view: 'all' | 'mine'
   /** Minutes between automatic syncs while the pane is open; 0: only by the button. */
   intervalMin: number
-  /** Redmine status id → Backlog.md status, and priority id → Backlog.md priority. */
+  /** Redmine status id (CSV: name) → Backlog.md status, and the same for priorities. */
   statusMap: Record<string, string>
   priorityMap: Record<string, string>
   /** Tasks that existed when the sync was set up: never sent to Redmine unless asked. */
@@ -111,18 +122,20 @@ export type SyncData = {
   links: Record<string, SyncLink>
   conflicts: SyncConflict[]
   /** Each issue's Redmine status and priority ids, from the last read. */
-  meta: Record<string, { statusId: number; priorityId: number | null; assigneeId?: number | null }>
-  /** The key's owner and their groups, as Redmine said at the last sync. */
-  me?: number[]
-  statuses: { id: number; name: string; isClosed: boolean }[]
-  priorities: { id: number; name: string; isDefault: boolean }[]
+  meta: Record<string, { statusId: number | string; priorityId: number | string | null; assigneeId?: number | string | null }>
+  /** The key's owner (and, in Redmine, their groups), as the tracker said at the last sync. */
+  me?: (number | string)[]
+  statuses: { id: number | string; name: string; isClosed: boolean }[]
+  priorities: { id: number | string; name: string; isDefault: boolean }[]
+  /** Jira: the project's issue types new tasks can be created as. */
+  issueTypes?: { id: string; name: string }[]
   lastSync?: string
   lastError?: string
   warnings: string[]
 }
 
 /** The project's sync as the pane draws it. */
-export type SyncView = { settings: RedmineSettings | null; data: SyncData; isSyncing: boolean }
+export type SyncView = { settings: SyncSettings | null; data: SyncData; isSyncing: boolean }
 
 declare module 'claude-code' {
   interface PluginState {

@@ -4,8 +4,9 @@
 
 import type { Change, Fields, RemoteItem } from './sync'
 
-export type RedmineStatus = { id: number; name: string; isClosed: boolean }
-export type RedminePriority = { id: number; name: string; isDefault: boolean }
+/** A status or priority: Redmine's id, or (from a CSV export, which has none) its name. */
+export type RedmineStatus = { id: number | string; name: string; isClosed: boolean; isActive?: boolean }
+export type RedminePriority = { id: number | string; name: string; isDefault: boolean }
 
 export type RedmineIssue = {
   id: number
@@ -136,10 +137,10 @@ const fold = (text: string) =>
     .trim()
     .toLowerCase()
 
-const ACTIVE = /progress|curso|progreso|doing|working|feedback|resolv|review|revision/
-const LOW = /^(low|baja?|bajo|minor)$/
+const ACTIVE = /progress|curso|progreso|doing|working|feedback|resolv|resuelt|review|revision/
+const LOW = /^(low|lowest|baja?|bajo|minor|menor|trivial)$/
 const NORMAL = /^(normal|medium|media|medio)$/
-const HIGH = /^(high|alta?|alto|urgent|urgente|immediate|inmediata|critical|critica)$/
+const HIGH = /^(high|highest|alta?|alto|urgent|urgente|immediate|inmediata|critical|critica|blocker|bloqueante|major|mayor)$/
 
 /**
  * Where each Redmine status lands in Backlog.md, by default: a status of
@@ -153,7 +154,8 @@ export function defaultStatusMap(redmine: RedmineStatus[], statuses: string[]): 
   const active = statuses.find(one => ACTIVE.test(fold(one))) ?? statuses[1] ?? statuses[0] ?? ''
   for (const status of redmine) {
     const named = statuses.find(one => fold(one) === fold(status.name))
-    map[String(status.id)] = named ?? (status.isClosed ? final : ACTIVE.test(fold(status.name)) ? active : statuses[0] ?? '')
+    const isActive = status.isActive ?? ACTIVE.test(fold(status.name))
+    map[String(status.id)] = named ?? (status.isClosed ? final : isActive ? active : statuses[0] ?? '')
   }
   return map
 }
@@ -198,21 +200,21 @@ export function redmineStatusFor(
   status: string,
   statusMap: Readonly<Record<string, string>>,
   redmine: RedmineStatus[],
-  current?: number,
-): number | undefined {
+  current?: number | string,
+): number | string | undefined {
   const matches = redmine.filter(one => statusMap[String(one.id)] === status)
-  return matches.find(one => one.id === current)?.id ?? matches[0]?.id
+  return (matches.find(one => one.id === current) ?? matches.find(one => fold(one.name) === fold(status)) ?? matches[0])?.id
 }
 
 export function redminePriorityFor(
   priority: string | null | undefined,
   priorityMap: Readonly<Record<string, string>>,
   redmine: RedminePriority[],
-  current?: number | null,
-): number | undefined {
+  current?: number | string | null,
+): number | string | undefined {
   if (!priority) return undefined
   const matches = redmine.filter(one => priorityMap[String(one.id)]?.toLowerCase() === priority.toLowerCase())
-  return matches.find(one => one.id === current)?.id ?? matches[0]?.id
+  return (matches.find(one => one.id === current) ?? matches.find(one => fold(one.name) === fold(priority)) ?? matches[0])?.id
 }
 
 /**
@@ -223,7 +225,7 @@ export function issueBody(
   change: Change,
   maps: { status: Readonly<Record<string, string>>; priority: Readonly<Record<string, string>> },
   lists: { statuses: RedmineStatus[]; priorities: RedminePriority[] },
-  current?: { statusId?: number; priorityId?: number | null },
+  current?: { statusId?: number | string; priorityId?: number | string | null },
 ): { issue: Record<string, string | number>; skipped: string[] } {
   const issue: Record<string, string | number> = {}
   const skipped: string[] = []

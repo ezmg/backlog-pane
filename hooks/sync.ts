@@ -11,8 +11,10 @@
 //     touched for that field until the person picks one.
 // Read-only mode never writes to the tracker: a field the tracker changed
 // overwrites the task's, and a change made only in Backlog.md stays local.
+// With `askOnClash` (a CSV export), a field changed on both sides is a
+// conflict there too, instead of the tracker's value winning.
 
-import type { RedmineSettings, SyncConflict, SyncData, SyncField, SyncFields, SyncLink, SyncMode } from '../types'
+import type { SyncConflict, SyncData, SyncField, SyncFields, SyncLink, SyncMode, SyncSettings } from '../types'
 
 export const FIELDS: readonly SyncField[] = ['title', 'status', 'priority', 'description']
 export type Field = SyncField
@@ -21,7 +23,8 @@ export type Conflict = SyncConflict
 export type Link = SyncLink
 export type { SyncMode }
 
-export type RemoteItem = { key: string; url: string; fields: Fields }
+/** An item of the tracker. `skip`: fields it does not carry (a CSV without that column), left alone. */
+export type RemoteItem = { key: string; url: string; fields: Fields; skip?: readonly SyncField[] }
 
 /**
  * A Backlog.md task as the list shows it. `description` is undefined when
@@ -57,11 +60,13 @@ export function mergeField(
   local: string | null | undefined,
   remote: string | null,
   mode: SyncMode,
+  askOnClash = false,
 ): { toLocal?: string | null; toRemote?: string | null; agreed: string | null; isConflict?: true } {
   const mine = local === undefined ? base : local
   if (same(mine, remote)) return { agreed: remote }
   const remoteChanged = !same(remote, base)
   const localChanged = !same(mine, base)
+  if (mode === 'read' && askOnClash && remoteChanged && localChanged) return { agreed: base, isConflict: true }
   if (mode === 'read') return remoteChanged ? { toLocal: remote, agreed: remote } : { agreed: base }
   if (remoteChanged && !localChanged) return { toLocal: remote, agreed: remote }
   if (localChanged && !remoteChanged) return { toRemote: mine, agreed: mine }
@@ -84,6 +89,8 @@ export function plan(input: {
   createsRemote: boolean
   /** Whether a reference names an item of this tracker, listed this time or not. */
   ownsRef?: (ref: string) => boolean
+  /** Read only, but a field changed on both sides is a conflict (see mergeField). */
+  askOnClash?: boolean
 }): Plan {
   const actions: Action[] = []
   const links: Record<string, Link> = {}
@@ -111,13 +118,14 @@ export function plan(input: {
     const toRemote: Change = {}
     const agreed = { ...link.base }
     for (const field of FIELDS) {
-      // A tracker priority with no Backlog.md one to land in: leave priority alone.
-      if (field === 'priority' && item.fields.priority === null) {
-        agreed.priority = task.fields.priority
+      // A tracker priority with no Backlog.md one to land in, or a field the
+      // tracker does not carry: leave it alone.
+      if ((field === 'priority' && item.fields.priority === null) || item.skip?.includes(field)) {
+        ;(agreed as Record<string, unknown>)[field] = task.fields[field] ?? link.base[field]
         continue
       }
       const open = input.conflicts.find(one => one.key === item.key && one.field === field)
-      const merged = mergeField(link.base[field], task.fields[field], item.fields[field], input.mode)
+      const merged = mergeField(link.base[field], task.fields[field], item.fields[field], input.mode, input.askOnClash)
       if (merged.isConflict) {
         conflicts.push({
           key: item.key,
@@ -171,17 +179,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 /** A project's sync as kept in $.store, keeping only what is well formed. */
-export function readSyncStore(value: unknown): { settings: RedmineSettings | null; data: SyncData } {
+export function readSyncStore(value: unknown): { settings: SyncSettings | null; data: SyncData } {
   const raw = isRecord(value) ? value : {}
   const data = isRecord(raw.data) ? raw.data : {}
   const strings = (one: unknown) => (isRecord(one) ? Object.fromEntries(Object.entries(one).filter(([, v]) => typeof v === 'string')) : {})
   const s = isRecord(raw.settings) ? raw.settings : undefined
-  const settings: RedmineSettings | null =
-    s && s.provider === 'redmine'
+  const settings: SyncSettings | null =
+    s && (s.provider === 'redmine' || s.provider === 'jira' || s.provider === 'csv')
       ? {
-          provider: 'redmine',
+          provider: s.provider,
           url: typeof s.url === 'string' ? s.url : '',
           project: typeof s.project === 'string' ? s.project : '',
+          file: typeof s.file === 'string' ? s.file : '',
+          issueType: typeof s.issueType === 'string' ? s.issueType : '',
           mode: s.mode === 'both' ? 'both' : 'read',
           onlyMine: s.onlyMine === true,
           view: s.view === 'mine' ? 'mine' : 'all',
@@ -199,7 +209,8 @@ export function readSyncStore(value: unknown): { settings: RedmineSettings | nul
       meta: isRecord(data.meta) ? (data.meta as SyncData['meta']) : {},
       statuses: Array.isArray(data.statuses) ? (data.statuses as SyncData['statuses']) : [],
       priorities: Array.isArray(data.priorities) ? (data.priorities as SyncData['priorities']) : [],
-      me: Array.isArray(data.me) ? data.me.filter(one => typeof one === 'number') : undefined,
+      issueTypes: Array.isArray(data.issueTypes) ? (data.issueTypes as SyncData['issueTypes']) : undefined,
+      me: Array.isArray(data.me) ? data.me.filter(one => typeof one === 'number' || typeof one === 'string') : undefined,
       lastSync: typeof data.lastSync === 'string' ? data.lastSync : undefined,
       lastError: typeof data.lastError === 'string' ? data.lastError : undefined,
       warnings: Array.isArray(data.warnings) ? data.warnings.filter(one => typeof one === 'string') : [],
@@ -212,11 +223,11 @@ export function readSyncStore(value: unknown): { settings: RedmineSettings | nul
  * the last sync, was assigned to someone else, to nobody, or was not listed.
  * Tasks with no issue are nobody else's, so they show.
  */
-export function othersTasks(links: Readonly<Record<string, Link>>, meta: SyncData['meta'], me: readonly number[]): Set<string> {
+export function othersTasks(links: Readonly<Record<string, Link>>, meta: SyncData['meta'], me: readonly (number | string)[]): Set<string> {
   const hidden = new Set<string>()
   for (const [key, link] of Object.entries(links)) {
     const assignee = meta[key]?.assigneeId
-    if (!link.taskId || (typeof assignee === 'number' && me.includes(assignee))) continue
+    if (!link.taskId || (assignee !== null && assignee !== undefined && me.includes(assignee))) continue
     hidden.add(link.taskId)
   }
   return hidden

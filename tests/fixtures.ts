@@ -117,8 +117,13 @@ export type World = {
 /** The session's working folder in every test. */
 export const CWD = '/work/demo'
 
+/** Bytes as `$.fs.read(…, { as: 'bytes' })` gives them. */
+export { toBase64 } from '../hooks/base64'
+import { toBase64 } from '../hooks/base64'
+
 class Files {
   private readonly texts = new Map<string, string>()
+  private readonly raw = new Map<string, Uint8Array>()
   // A relative path is under CWD; `..` and `.` are resolved.
   private static key(path: string) {
     const slashed = path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/)/, '')
@@ -132,6 +137,15 @@ class Files {
   }
   get(path: string) {
     return this.texts.get(Files.key(path))
+  }
+  /** A file's bytes: those set with setBytes, else its text in UTF-8. */
+  bytes(path: string) {
+    const text = this.get(path)
+    return this.raw.get(Files.key(path)) ?? (text === undefined ? undefined : new TextEncoder().encode(text))
+  }
+  setBytes(path: string, bytes: Uint8Array) {
+    this.raw.set(Files.key(path), bytes)
+    this.texts.set(Files.key(path), '')
   }
   set(path: string, text: string) {
     this.texts.set(Files.key(path), text)
@@ -197,7 +211,7 @@ export function world(on: On, options: World = {}) {
     return { value: undefined }
   })
   on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
-  const requests: { method: string; url: string; body?: unknown; key?: string }[] = []
+  const requests: { method: string; url: string; body?: unknown; key?: string; auth?: string }[] = []
   if (options.http) {
     const http = options.http
     on('http.fetch', (_, e) => {
@@ -207,6 +221,7 @@ export function world(on: On, options: World = {}) {
         url: e.url,
         body: init.body ? JSON.parse(init.body) : undefined,
         key: init.headers?.['X-Redmine-API-Key'],
+        auth: init.headers?.Authorization,
       })
       const answer = http(e.url, init)
       return {
@@ -221,6 +236,11 @@ export function world(on: On, options: World = {}) {
     return { value: undefined }
   })
   on('fs.read', (_, e) => {
+    if (e.as === 'bytes') {
+      const bytes = files.bytes(e.path)
+      if (bytes === undefined) throw new Error(`ENOENT: ${e.path}`)
+      return { value: { base64: toBase64(bytes) } }
+    }
     const text = files.get(e.path)
     if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
     return { value: text }

@@ -60,6 +60,12 @@ for you**.
 - **Redmine sync.** **Integration…** links the project to a Redmine project, read only
   or both ways. Issues become tasks and stay in step field by field, with a button and
   every few minutes. See [Integration (Redmine)](#integration-redmine).
+- **Jira sync.** The same as Redmine's, with Jira Cloud or Data Center / Server: read
+  only or both ways, all issues or only yours, conflicts asked. See
+  [Integration (Jira)](#integration-jira).
+- **Excel / CSV, with no API key.** Export the issues from Redmine as CSV and the pane
+  reads them into tasks, read only, when you press **Sync now**. See
+  [Integration (Excel / CSV)](#integration-excel--csv).
 - **English and Spanish.** The pane, the command and both drafts. See the `language`
   option.
 - **CLI only, with one exception.** Every change to a task runs a `backlog` command
@@ -131,8 +137,9 @@ them, and a project moved to another folder starts afresh. The `closedStatuses` 
 
 ## Integration (Redmine)
 
-Each project can be linked to **one** outside tracker. Redmine is the first; Jira and Excel
-come next. The tasks are copied into Backlog.md with the `backlog` CLI, so the board,
+Each project can be linked to **one** outside tracker: Redmine's API, Jira's (see
+[Integration (Jira)](#integration-jira)), or a CSV that Redmine exported (see
+[Integration (Excel / CSV)](#integration-excel--csv)). The tasks are copied into Backlog.md with the `backlog` CLI, so the board,
 Claude and Backlog.md's own tools all see them as ordinary tasks.
 
 **Set it up:**
@@ -199,6 +206,118 @@ too** sends them.
 Settings, links and mappings are kept **per project** in Claude Code's store for the mod,
 like the colours, so they are yours alone. The key is per user: one key for every project
 you sync, sent only in the `X-Redmine-API-Key` header to the URL each project sets.
+
+### Keeping the API key safe
+
+The mod never shows the key to Claude: it is not in the prompt, the conversation, the
+pane (which only says whether it is set), the tasks or the mod's store. But Claude Code
+keeps it on your machine, and Claude has tools that read files:
+
+- **macOS** keeps it in the Keychain, which asks before a program reads it.
+- **Windows and Linux** keep it in `~/.claude/.credentials.json`, a plain file guarded
+  only by your user's permissions. Claude would need your approval to read it (it is
+  outside the project), unless a permission mode approves everything for you.
+
+To close that door:
+
+1. **Deny reading it**, in `~/.claude/settings.json`. Deny rules win over every
+   permission mode:
+
+   ```json
+   {
+     "permissions": {
+       "deny": ["Read(~/.claude/.credentials.json)", "Bash(*credentials.json*)"]
+     }
+   }
+   ```
+
+   The `Read` rule is the one that matters; the `Bash` one only catches the plain cases.
+2. **Give the key only the rights it needs.** Use a Redmine user whose role can only view
+   issues if you sync read only, so a leaked key can change nothing.
+3. **Regenerate it** in Redmine (**My account → API access key**) if you think it leaked.
+   The old one stops working at once.
+
+## Integration (Jira)
+
+The same as Redmine's: pick **Jira (API)** in **Integration…**, and the modes, the
+**Issues** option, the board's **View: all / only mine**, the mappings, the conflicts, the
+interval, the tasks from before and *nothing is deleted* all work as described above. It
+works with **Jira Cloud** (`*.atlassian.net`) and with **Jira Data Center / Server**.
+
+**Set it up:**
+
+1. Get a token:
+   - **Cloud:** an API token at
+     [id.atlassian.com → Security → API tokens](https://id.atlassian.com/manage-profile/security/api-tokens).
+     Put it in the plugin's **Jira API token** option, and your Atlassian account's email
+     in **Jira email**.
+   - **Data Center / Server:** a personal access token (**Profile → Personal Access
+     Tokens**). Put it in **Jira API token** and leave **Jira email** empty.
+
+   The token is a sensitive option, kept in secure storage like Redmine's key (see
+   [Keeping the API key safe](#keeping-the-api-key-safe)).
+2. In **Integration…**, pick **Jira (API)**, and type the site's URL
+   (`https://your-company.atlassian.net`) and the project's key (the letters of its issue
+   keys: `APP` for `APP-12`).
+3. Pick the mode, the issues and the interval, then **Sync now**.
+
+**What is different from Redmine:**
+
+- **Statuses move by transitions.** Jira does not let a status be set: an issue moves
+  along its workflow. The pane uses the transition to the task's status when one is open
+  from where the issue is. If the workflow has none (say, *To Do* straight to *Done*),
+  the status is not sent, the pane says so, and it tries again on the next sync. Move the
+  issue in Jira, or one step at a time in Backlog.md.
+- **The default mapping** uses Jira's status categories: *To Do* ones go to the first
+  status, *In Progress* ones to yours, *Done* ones to the final one. Priorities map by
+  name (*Highest* and *High* → High, *Medium* → Medium, *Low* and *Lowest* → Low).
+- **New tasks** (both ways) are created as a **Task** (or the first issue type the project
+  has; **Issue type for new tasks** picks another), then moved along to the task's status.
+  With *only mine*, they are assigned to you.
+- **Descriptions** go across as text: Jira's wiki markup one way, Backlog.md's Markdown the
+  other, with no conversion.
+- **References** hold each issue's page: `https://your-company.atlassian.net/browse/APP-12`.
+
+Only one token is kept, so all the projects you sync with Jira use the same account.
+
+## Integration (Excel / CSV)
+
+For when you can't get a Redmine API key but can export the issues. Redmine exports them
+as CSV, which Excel opens; the pane reads that file. It is **read only**: nothing is ever
+written to the file or to Redmine.
+
+**Set it up:**
+
+1. In Redmine, open **Issues** and filter them as you like (for example
+   *Assignee: «me»*, to get only yours). At the bottom, under *Also available in*, click
+   **CSV**, tick **Description**, and **Export**.
+2. Save the file, say `C:\Users\you\Downloads\issues.csv`.
+3. In the pane, press **Integration…**, pick **Excel / CSV (Redmine export)** as the
+   tracker, and type the file's path (absolute, relative to the session's folder, or
+   starting with `~`).
+4. Optionally, type your Redmine's URL. The tasks' references then hold each issue's URL
+   (`…/issues/12`) instead of `#12`, and if you later get an API key, **Redmine (API)**
+   picks the same tasks up instead of copying them again.
+5. Press **Sync now**.
+
+**Each time** you want fresh data, export again over the same file and press **Sync now**.
+The file is read only then: not when the pane opens, and not on a timer.
+
+**What it reads:** the columns `#`, *Subject*, *Status*, *Priority* and *Description*, by
+their headers in English, Spanish and Redmine's other main languages. Only `#` and
+*Subject* are needed; a field with no column is left alone, and the pane says so. The
+separator (`,`, `;` or tab) and the encoding (UTF-8, or Windows-1252 as Redmine writes
+Spanish by default) are found by themselves.
+
+**Statuses and priorities** are mapped by name, the same way as with the API (a status
+with a date in the *Closed* column, or a name like *Cerrada* or *Rechazada*, goes to the
+final status), and you can change each one in **Integration…**.
+
+**Your changes in Backlog.md** stay there: a field you changed in Backlog.md is not
+overwritten by the next file. When a field changed both in the file and in Backlog.md,
+the pane asks, with **Use the file's** and **Use Backlog.md's**. Keeping Backlog.md's holds
+until the file changes that field again. Nothing is deleted: an issue that is no longer in
+the file leaves its task as it was.
 
 ## Editing long text
 
@@ -315,6 +434,8 @@ To close the pane, click its close mark or press `ctrl+x` then `x`. Closing it s
 | `backlogPath` | *(empty)* | Full path to the `backlog` executable. When empty, the mod tries `backlog` on PATH. On Windows it then tries the native binaries npm and bun install globally. |
 | `doneLimit` | `5` | How many of the most recent tasks in the final status (and in each closed status) the board shows, and the list shows when that group is unfolded. |
 | `closedStatuses` | *(empty)* | Optional. Statuses that start as closed in a project where you have never ticked a **Closed** box in **Statuses…**, separated by commas (for example `Cancelled`). Once you tick or untick one, the project keeps its own list. |
+| `jiraEmail` | *(empty)* | For Jira Cloud: the email of the Atlassian account the token belongs to. Empty for Data Center / Server. |
+| `jiraApiToken` | *(empty)* | Your Jira API token (Cloud) or personal access token (Data Center / Server). Sensitive: kept in secure storage, and sent only to the Jira URL each project sets. |
 | `redmineApiKey` | *(empty)* | Your Redmine API key, for the projects you link to Redmine in **Integration…**. Sensitive: kept in secure storage, and sent only to the Redmine URL each project sets. |
 | `language` | `auto` | `en` (English), `es` (Spanish), or `auto`. With `auto` the mod uses the first of these that is set: Claude Code's `language` setting (free text such as `Español`, `Spanish` or `English`), then `LC_ALL`, `LC_MESSAGES`, `LANG`, then the system locale. If none is set, it uses English. Any language other than Spanish shows English. |
 
@@ -391,6 +512,10 @@ things to know:
 | Redmine: take a change | `backlog task edit <id> -t … -s … --priority … -d …` (only the fields that changed) |
 | Redmine: who you are | `GET /users/current.json?include=groups`, for the view and for assigning new issues |
 | Redmine: send a change (both ways) | `PUT /issues/<n>.json` with the fields that changed |
+| Jira: read | `GET /rest/api/2/project/<key>`, `…/project/<key>/statuses`, the priorities, `/myself`, and the JQL `project = "<key>" ORDER BY key` (with `AND assignee = currentUser()` for only mine) on `/rest/api/2/search/jql` (Cloud) or `/rest/api/2/search` (Data Center) |
+| Jira: send a change (both ways) | `PUT /rest/api/2/issue/<key>` with the fields that changed; the status by `GET` and `POST …/issue/<key>/transitions` |
+| Jira: send a new task (both ways) | `POST /rest/api/2/issue`, then its transition to the task's status, then `backlog task edit <id> --add-ref <issue URL>` |
+| Excel / CSV: read the file | `$.fs.read` of the file's bytes (4 MiB at most), then the same `task create` / `task edit` as Redmine's |
 | Redmine: send a new task (both ways) | `POST /issues.json` (with only mine, assigned to you), then `backlog task edit <id> --add-ref <issue URL>` |
 
 The editing commands were checked against Backlog.md 1.55.3. Rewriting the criteria list
@@ -424,7 +549,16 @@ the pane shows the error and a **Retry** button.
   versions and custom fields are not synced. Descriptions go across as they are, with no
   conversion between Redmine's Textile (or Markdown) and Backlog.md's Markdown. A Redmine
   workflow can refuse a status change; the pane shows Redmine's reason and tries again on
-  the next sync. The sync runs only while the pane is open. Jira and Excel are not there yet.
+  the next sync. The sync runs only while the pane is open.
+- **Jira:** the same fields as Redmine's are synced, and the same are not (plus sprints,
+  epics, components and labels). A status the workflow can't reach in one transition is
+  not sent. Required fields beyond the summary and the issue type make creating an issue
+  fail; the pane shows Jira's reason. Tested against a Jira in memory, not a real site
+  yet.
+- **Excel / CSV:** a CSV, not an `.xlsx` file (Redmine exports issues as CSV unless a
+  plugin adds Excel). It is read only and read only with the button, and a file over
+  4 MiB can't be read. Choosing the CSV tracker in place of the API one, or back, keeps
+  the links but not the status and priority mappings.
 - **Not yet:** plan approval, automatic sync when Claude finishes, milestones and the
   definition of done. Subtasks, dependencies, labels and assignees are not shown.
 - The live list covers what `task list` returns, so drafts and archived tasks are not
@@ -451,10 +585,13 @@ hooks/board.tsx                   the board's Client surface module (terminal, d
 hooks/cli.ts                      pure helpers: commands, JSON stream reader, grouping, colours, editor
 hooks/sync.ts                     pure sync core: three-way merge per field, the plan of each sync
 hooks/redmine.ts                  pure Redmine adapter: URLs, parsing, default mappings, issue bodies
+hooks/jira.ts                     pure Jira adapter: Cloud and Data Center, search pages, statuses, transitions, fields
+hooks/csv.ts                      pure CSV adapter: encodings, parsing, Redmine's export columns
+hooks/base64.ts                   base64 both ways (file bytes, Jira's basic authentication)
 hooks/i18n.ts                     English and Spanish strings, language detection
 types/index.d.ts                  the $.state contract, the board's props, Backlog.md shapes
 tests/                            claude plugin test suites (fixtures.ts is the fake world, with a fake config;
-                                  fake-redmine.ts a Redmine in memory)
+                                  fake-redmine.ts a Redmine and fake-jira.ts a Jira in memory)
 ```
 
 Run the mod from a working copy for one session:
@@ -507,6 +644,12 @@ cover:
 - both drafts;
 - the Redmine sync: the merge, read only and both ways, only mine (synced and viewed), conflicts, mappings, refused
   writes, the timer, a missing or wrong key, a missing project and an unreachable server;
+- the Jira sync: Cloud and Data Center authentication and paging, read only and both ways,
+  transitions and a workflow that has none, creating issues, conflicts, only mine, a
+  missing token or email, a wrong token and a missing project;
+- the CSV tracker: encodings, separators and quoted fields, the export's columns in
+  English and Spanish, a new export, a local change, a clash on each side, adoption by
+  URL, missing columns, a missing file and a file that is not an export;
 - the missing-CLI, uninitialized, failing-watch and headless states.
 
 They run on the terminal, desktop, VS Code and mobile surfaces where each applies, and give

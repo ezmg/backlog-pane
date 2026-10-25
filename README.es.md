@@ -64,6 +64,12 @@ del prompt. El prompt **nunca se envía por ti**.
   Redmine, en solo lectura o bidireccional. Las peticiones se convierten en tareas y se
   mantienen al día campo a campo, con un botón y cada pocos minutos. Ver
   [Integración (Redmine)](#integración-redmine).
+- **Sincronización con Jira.** Igual que con Redmine, con Jira Cloud o Data Center /
+  Server: solo lectura o bidireccional, todas las incidencias o solo las tuyas, y los
+  conflictos se preguntan. Ver [Integración (Jira)](#integración-jira).
+- **Excel / CSV, sin clave de API.** Exporta las peticiones de Redmine como CSV y el panel
+  las lee como tareas, en solo lectura, al pulsar **Sincronizar ahora**. Ver
+  [Integración (Excel / CSV)](#integración-excel--csv).
 - **Inglés y español.** El panel, el comando y los dos borradores. Ver la opción
   `language`.
 - **Solo la CLI, con una excepción.** Cada cambio en una tarea ejecuta un comando `backlog`
@@ -142,8 +148,9 @@ marcado ninguna casilla **Cerrado**.
 
 ## Integración (Redmine)
 
-Cada proyecto puede enlazarse con **un** gestor de tareas externo. Redmine es el primero;
-Jira y Excel vienen después. Las tareas se copian en Backlog.md con la CLI `backlog`, así
+Cada proyecto puede enlazarse con **un** gestor de tareas externo: la API de Redmine, la de
+Jira (ver [Integración (Jira)](#integración-jira)), o un CSV exportado de Redmine (ver
+[Integración (Excel / CSV)](#integración-excel--csv)). Las tareas se copian en Backlog.md con la CLI `backlog`, así
 que el tablero, Claude y las propias herramientas de Backlog.md las ven como tareas
 normales.
 
@@ -214,6 +221,124 @@ Los ajustes, los enlaces y las correspondencias se guardan **por proyecto** en e
 de Claude Code para el mod, como los colores, así que son solo tuyos. La clave es por
 usuario: una para todos los proyectos que sincronices, enviada solo en la cabecera
 `X-Redmine-API-Key` a la URL que fija cada proyecto.
+
+### Proteger la clave de API
+
+El mod nunca le enseña la clave a Claude: no está en el prompt, en la conversación, en el
+panel (que solo dice si está configurada), en las tareas ni en el almacén del mod. Pero
+Claude Code la guarda en tu equipo, y Claude tiene herramientas que leen archivos:
+
+- **macOS** la guarda en el Llavero, que pregunta antes de que un programa la lea.
+- **Windows y Linux** la guardan en `~/.claude/.credentials.json`, un archivo de texto
+  protegido solo por los permisos de tu usuario. Claude necesitaría tu aprobación para
+  leerlo (está fuera del proyecto), salvo que un modo de permisos lo apruebe todo por ti.
+
+Para cerrar esa puerta:
+
+1. **Prohíbe leerlo**, en `~/.claude/settings.json`. Las reglas de denegación ganan a
+   cualquier modo de permisos:
+
+   ```json
+   {
+     "permissions": {
+       "deny": ["Read(~/.claude/.credentials.json)", "Bash(*credentials.json*)"]
+     }
+   }
+   ```
+
+   La regla de `Read` es la importante; la de `Bash` solo tapa los casos evidentes.
+2. **Dale a la clave solo los permisos que necesita.** Usa un usuario de Redmine cuyo rol
+   solo pueda ver peticiones si sincronizas en solo lectura; así una clave filtrada no
+   puede cambiar nada.
+3. **Regenérala** en Redmine (**Mi cuenta → Clave de acceso de la API**) si crees que se ha
+   filtrado. La antigua deja de valer al momento.
+
+## Integración (Jira)
+
+Igual que con Redmine: elige **Jira (API)** en **Integración…**, y los modos, la opción
+**Peticiones**, el botón **Ver: todas / solo mías** del tablero, las correspondencias, los
+conflictos, el intervalo, las tareas de antes y el *no se borra nada* funcionan como se
+explica arriba. Funciona con **Jira Cloud** (`*.atlassian.net`) y con **Jira Data Center /
+Server**.
+
+**Configurarlo:**
+
+1. Consigue un token:
+   - **Cloud:** un token de API en
+     [id.atlassian.com → Seguridad → Tokens de API](https://id.atlassian.com/manage-profile/security/api-tokens).
+     Ponlo en la opción **Jira API token** del plugin, y el email de tu cuenta de
+     Atlassian en **Jira email**.
+   - **Data Center / Server:** un token de acceso personal (**Perfil → Tokens de acceso
+     personal**). Ponlo en **Jira API token** y deja **Jira email** vacío.
+
+   El token es una opción sensible, que se guarda en el almacenamiento seguro igual que
+   la clave de Redmine (ver [Proteger la clave de API](#proteger-la-clave-de-api)).
+2. En **Integración…**, elige **Jira (API)** y escribe la URL del sitio
+   (`https://tu-empresa.atlassian.net`) y la clave del proyecto (las letras de sus
+   incidencias: `APP` para `APP-12`).
+3. Elige el modo, las peticiones y el intervalo, y pulsa **Sincronizar ahora**.
+
+**En qué se diferencia de Redmine:**
+
+- **Los estados se mueven con transiciones.** Jira no deja fijar un estado: la incidencia
+  avanza por su flujo de trabajo. El panel usa la transición al estado de la tarea si hay
+  una disponible desde donde está la incidencia. Si el flujo no la tiene (por ejemplo, de
+  *To Do* directamente a *Done*), el estado no se envía, el panel lo avisa y lo reintenta
+  en la siguiente sincronización. Mueve la incidencia en Jira, o paso a paso en Backlog.md.
+- **La correspondencia por defecto** usa las categorías de estado de Jira: las de *Por
+  hacer* van al primer estado, las de *En curso* al tuyo, las de *Hecho* al estado final.
+  Las prioridades van por nombre (*Highest* y *High* → High, *Medium* → Medium, *Low* y
+  *Lowest* → Low).
+- **Las tareas nuevas** (bidireccional) se crean como **Tarea** (*Task*), o como el primer
+  tipo de incidencia del proyecto; **Tipo de incidencia para las tareas nuevas** elige
+  otro. Después se mueven al estado de la tarea. Con *solo mías*, se te asignan a ti.
+- **Las descripciones** pasan como texto: el formato wiki de Jira en un sentido y el
+  Markdown de Backlog.md en el otro, sin conversión.
+- **Las referencias** guardan la página de cada incidencia:
+  `https://tu-empresa.atlassian.net/browse/APP-12`.
+
+Solo se guarda un token, así que todos los proyectos que sincronices con Jira usan la
+misma cuenta.
+
+## Integración (Excel / CSV)
+
+Para cuando no puedes conseguir una clave de API de Redmine pero sí exportar las
+peticiones. Redmine las exporta como CSV, que se abre con Excel; el panel lee ese
+archivo. Es **solo lectura**: nunca se escribe nada en el archivo ni en Redmine.
+
+**Configurarlo:**
+
+1. En Redmine, abre **Peticiones** y fíltralas como quieras (por ejemplo
+   *Asignado a: «yo»*, para quedarte solo con las tuyas). Abajo, en *También disponible
+   en*, pulsa **CSV**, marca **Descripción** y **Exportar**.
+2. Guarda el archivo, por ejemplo `C:\Users\tú\Downloads\issues.csv`.
+3. En el panel, pulsa **Integración…**, elige **Excel / CSV (exportación de Redmine)** como
+   gestor y escribe la ruta del archivo (absoluta, relativa a la carpeta de la sesión, o
+   empezando por `~`).
+4. Si quieres, escribe la URL de tu Redmine. Así las referencias de las tareas guardan la
+   URL de cada petición (`…/issues/12`) en lugar de `#12`, y si algún día consigues una
+   clave de API, **Redmine (API)** reconoce esas mismas tareas en vez de copiarlas otra vez.
+5. Pulsa **Sincronizar ahora**.
+
+**Cada vez** que quieras datos nuevos, vuelve a exportar sobre el mismo archivo y pulsa
+**Sincronizar ahora**. El archivo solo se lee entonces: no al abrir el panel ni cada
+cierto tiempo.
+
+**Qué lee:** las columnas `#`, *Asunto*, *Estado*, *Prioridad* y *Descripción*, por sus
+cabeceras en español, inglés y los otros idiomas principales de Redmine. Solo hacen falta
+`#` y *Asunto*; un campo sin columna no se toca, y el panel lo avisa. El separador (`,`,
+`;` o tabulador) y la codificación (UTF-8, o Windows-1252 como Redmine escribe en español
+por defecto) se detectan solos.
+
+**Estados y prioridades** se asignan por nombre, igual que con la API (un estado con fecha
+en la columna *Cerrada*, o con un nombre como *Cerrada* o *Rechazada*, va al estado final),
+y puedes cambiar cada uno en **Integración…**.
+
+**Tus cambios en Backlog.md** se quedan: un campo que cambiaste en Backlog.md no lo pisa el
+siguiente archivo. Si un campo cambió en el archivo y en Backlog.md, el panel pregunta, con
+**Usar el del archivo** y **Usar el de Backlog.md**. Quedarte con el de Backlog.md vale hasta
+que el archivo vuelva a cambiar ese campo. No se borra nada: una petición que ya no está en
+el archivo deja su tarea como estaba.
 
 ## Editar textos largos
 
@@ -337,6 +462,8 @@ cerrarlo se detiene el proceso `--watch`.
 | `backlogPath` | *(vacío)* | Ruta completa al ejecutable `backlog`. Si está vacía, el mod prueba `backlog` en el PATH. En Windows, después prueba los binarios nativos que npm y bun instalan de forma global. |
 | `doneLimit` | `5` | Cuántas de las tareas más recientes del estado final (y de cada estado cerrado) muestra el tablero, y la lista cuando ese grupo está desplegado. |
 | `closedStatuses` | *(vacío)* | Opcional. Estados que empiezan como cerrados en un proyecto en el que nunca has marcado una casilla **Cerrado** en **Estados…**, separados por comas (por ejemplo `Cancelled`). En cuanto marcas o desmarcas una, el proyecto guarda su propia lista. |
+| `jiraEmail` | *(vacío)* | Para Jira Cloud: el email de la cuenta de Atlassian del token. Vacío para Data Center / Server. |
+| `jiraApiToken` | *(vacío)* | Tu token de API de Jira (Cloud) o token de acceso personal (Data Center / Server). Sensible: se guarda en el almacenamiento seguro y solo se envía a la URL de Jira que fija cada proyecto. |
 | `redmineApiKey` | *(vacío)* | Tu clave de API de Redmine, para los proyectos que enlaces con Redmine en **Integración…**. Sensible: se guarda en el almacenamiento seguro y solo se envía a la URL de Redmine que fija cada proyecto. |
 | `language` | `auto` | `en` (inglés), `es` (español) o `auto`. Con `auto`, el mod usa lo primero de esta lista que esté definido: el ajuste `language` de Claude Code (texto libre como `Español`, `Spanish` o `English`), luego `LC_ALL`, `LC_MESSAGES`, `LANG` y por último el idioma del sistema. Si no hay ninguno, usa inglés. Cualquier idioma que no sea español se muestra en inglés. |
 
@@ -415,6 +542,10 @@ Linux. Tres cosas a tener en cuenta:
 | Redmine: recibir un cambio | `backlog task edit <id> -t … -s … --priority … -d …` (solo los campos que cambiaron) |
 | Redmine: quién eres | `GET /users/current.json?include=groups`, para la vista y para asignar las peticiones nuevas |
 | Redmine: enviar un cambio (bidireccional) | `PUT /issues/<n>.json` con los campos que cambiaron |
+| Jira: leer | `GET /rest/api/2/project/<clave>`, `…/project/<clave>/statuses`, las prioridades, `/myself` y el JQL `project = "<clave>" ORDER BY key` (con `AND assignee = currentUser()` para solo mías) en `/rest/api/2/search/jql` (Cloud) o `/rest/api/2/search` (Data Center) |
+| Jira: enviar un cambio (bidireccional) | `PUT /rest/api/2/issue/<clave>` con los campos que cambiaron; el estado con `GET` y `POST …/issue/<clave>/transitions` |
+| Jira: enviar una tarea nueva (bidireccional) | `POST /rest/api/2/issue`, luego su transición al estado de la tarea, y luego `backlog task edit <id> --add-ref <URL de la incidencia>` |
+| Excel / CSV: leer el archivo | `$.fs.read` de los bytes del archivo (4 MiB como mucho), y luego los mismos `task create` / `task edit` que con Redmine |
 | Redmine: enviar una tarea nueva (bidireccional) | `POST /issues.json` (con solo mías, asignada a ti), y luego `backlog task edit <id> --add-ref <URL de la petición>` |
 
 Los comandos de edición se comprobaron con Backlog.md 1.55.3. Al reescribir la lista de
@@ -451,7 +582,16 @@ Tras 5 fallos seguidos, el panel muestra el error y un botón **Reintentar**.
   descripciones pasan tal cual, sin convertir entre el Textile (o Markdown) de Redmine y el
   Markdown de Backlog.md. Un flujo de trabajo de Redmine puede rechazar un cambio de
   estado; el panel muestra el motivo de Redmine y lo reintenta en la siguiente
-  sincronización. Solo sincroniza con el panel abierto. Jira y Excel aún no están.
+  sincronización. Solo sincroniza con el panel abierto.
+- **Jira:** se sincronizan los mismos campos que con Redmine, y quedan fuera los mismos
+  (más sprints, épicas, componentes y etiquetas). Un estado al que el flujo no llega con
+  una sola transición no se envía. Si el proyecto exige campos además del resumen y el
+  tipo, crear la incidencia falla y el panel muestra el motivo de Jira. Probado contra un
+  Jira simulado, todavía no contra un sitio real.
+- **Excel / CSV:** un CSV, no un archivo `.xlsx` (Redmine exporta las peticiones como CSV
+  salvo que un plugin añada Excel). Es solo lectura y solo se lee con el botón, y no se
+  puede leer un archivo de más de 4 MiB. Cambiar del gestor CSV al de la API, o al revés,
+  conserva los enlaces pero no la correspondencia de estados y prioridades.
 - **Todavía no:** aprobación del plan, sincronización automática cuando Claude termina,
   hitos y la definición de terminado. No se muestran subtareas, dependencias, etiquetas ni
   responsables.
@@ -479,10 +619,13 @@ hooks/board.tsx                   el módulo de superficie Client del tablero (t
 hooks/cli.ts                      funciones puras: comandos, lector del flujo JSON, agrupación, colores, editor
 hooks/sync.ts                     núcleo puro de la sincronización: fusión a tres bandas por campo, el plan de cada sincronización
 hooks/redmine.ts                  adaptador puro de Redmine: URLs, lectura, correspondencias por defecto, cuerpos de las peticiones
+hooks/jira.ts                     adaptador puro de Jira: Cloud y Data Center, páginas de búsqueda, estados, transiciones, campos
+hooks/csv.ts                      adaptador puro de CSV: codificaciones, lectura, las columnas de la exportación de Redmine
+hooks/base64.ts                   base64 en los dos sentidos (bytes de archivos, autenticación básica de Jira)
 hooks/i18n.ts                     textos en inglés y español, detección del idioma
 types/index.d.ts                  el contrato de $.state, las props del tablero, las formas de Backlog.md
 tests/                            suites de claude plugin test (fixtures.ts es el mundo simulado, con una configuración falsa;
-                                  fake-redmine.ts un Redmine en memoria)
+                                  fake-redmine.ts un Redmine y fake-jira.ts un Jira en memoria)
 ```
 
 Ejecuta el mod desde una copia de trabajo para una sesión:
@@ -536,6 +679,14 @@ Cubren:
 - la sincronización con Redmine: la fusión, solo lectura y bidireccional, solo mías (al sincronizar y al ver), conflictos,
   correspondencias, escrituras rechazadas, el temporizador, una clave que falta o es
   incorrecta, un proyecto que no existe y un servidor inalcanzable;
+- la sincronización con Jira: autenticación y paginación de Cloud y Data Center, solo
+  lectura y bidireccional, transiciones y un flujo que no las tiene, crear incidencias,
+  conflictos, solo mías, un token o email que falta, un token incorrecto y un proyecto que
+  no existe;
+- el gestor CSV: codificaciones, separadores y campos entre comillas, las columnas de la
+  exportación en español e inglés, una exportación nueva, un cambio local, un choque
+  resuelto de cada lado, la adopción por URL, columnas que faltan, un archivo que no
+  existe y un archivo que no es una exportación;
 - los estados de CLI ausente, proyecto sin inicializar, vigilancia que falla y sin
   interfaz.
 
