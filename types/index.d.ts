@@ -91,7 +91,7 @@ export type SyncConflict = {
  * Where a project's tasks come from: Redmine's API, or a CSV file Redmine
  * exported (read only, read when the person presses Sync now).
  */
-export type SyncProvider = 'redmine' | 'csv'
+export type SyncProvider = 'redmine' | 'jira' | 'csv'
 
 /** How a project syncs, as the person set it up in Integration…. */
 export type SyncSettings = {
@@ -101,6 +101,8 @@ export type SyncSettings = {
   project: string
   /** CSV: the exported file, absolute or relative to the session's folder. */
   file: string
+  /** Jira: the issue type new tasks are created as (its id); '' picks Task, or the first. */
+  issueType?: string
   mode: SyncMode
   /** Only the issues assigned to the key's owner; new tasks sent to Redmine are assigned to them. */
   onlyMine: boolean
@@ -120,11 +122,13 @@ export type SyncData = {
   links: Record<string, SyncLink>
   conflicts: SyncConflict[]
   /** Each issue's Redmine status and priority ids, from the last read. */
-  meta: Record<string, { statusId: number; priorityId: number | null; assigneeId?: number | null }>
-  /** The key's owner and their groups, as Redmine said at the last sync. */
-  me?: number[]
+  meta: Record<string, { statusId: number | string; priorityId: number | string | null; assigneeId?: number | string | null }>
+  /** The key's owner (and, in Redmine, their groups), as the tracker said at the last sync. */
+  me?: (number | string)[]
   statuses: { id: number | string; name: string; isClosed: boolean }[]
   priorities: { id: number | string; name: string; isDefault: boolean }[]
+  /** Jira: the project's issue types new tasks can be created as. */
+  issueTypes?: { id: string; name: string }[]
   lastSync?: string
   lastError?: string
   warnings: string[]

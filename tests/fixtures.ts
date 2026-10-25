@@ -117,20 +117,9 @@ export type World = {
 /** The session's working folder in every test. */
 export const CWD = '/work/demo'
 
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-
 /** Bytes as `$.fs.read(…, { as: 'bytes' })` gives them. */
-export function toBase64(bytes: Uint8Array): string {
-  let text = ''
-  for (let i = 0; i < bytes.length; i += 3) {
-    const [a = 0, b = 0, c = 0] = [bytes[i], bytes[i + 1], bytes[i + 2]]
-    const n = (a << 16) | (b << 8) | c
-    text += BASE64[(n >> 18) & 63]! + BASE64[(n >> 12) & 63]!
-    text += i + 1 < bytes.length ? BASE64[(n >> 6) & 63]! : '='
-    text += i + 2 < bytes.length ? BASE64[n & 63]! : '='
-  }
-  return text
-}
+export { toBase64 } from '../hooks/base64'
+import { toBase64 } from '../hooks/base64'
 
 class Files {
   private readonly texts = new Map<string, string>()
@@ -222,7 +211,7 @@ export function world(on: On, options: World = {}) {
     return { value: undefined }
   })
   on('fs.exists', (_, e) => ({ value: files.has(e.path) }))
-  const requests: { method: string; url: string; body?: unknown; key?: string }[] = []
+  const requests: { method: string; url: string; body?: unknown; key?: string; auth?: string }[] = []
   if (options.http) {
     const http = options.http
     on('http.fetch', (_, e) => {
@@ -232,6 +221,7 @@ export function world(on: On, options: World = {}) {
         url: e.url,
         body: init.body ? JSON.parse(init.body) : undefined,
         key: init.headers?.['X-Redmine-API-Key'],
+        auth: init.headers?.Authorization,
       })
       const answer = http(e.url, init)
       return {
