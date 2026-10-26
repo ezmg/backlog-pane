@@ -22,7 +22,11 @@ export const args = {
   defaultEditor: () => ['config', 'get', 'defaultEditor'],
   defaultStatus: () => ['config', 'get', 'defaultStatus'],
   /** A task made from a tracker's issue, linked to it by its URL in the references. */
-  createFrom: (fields: { title: string; status: string; priority: string | null; description: string }, ref: string) => [
+  createFrom: (
+    fields: { title: string; status: string; priority: string | null; description: string },
+    ref: string,
+    structure: { label?: string; parent?: string } = {},
+  ) => [
     'task',
     'create',
     fields.title,
@@ -32,6 +36,17 @@ export const args = {
     ...(fields.description.trim() ? ['-d', fields.description] : []),
     '--ref',
     ref,
+    ...(structure.label ? ['-l', structure.label] : []),
+    ...(structure.parent ? ['-p', structure.parent] : []),
+  ],
+  /** Swaps one label for another, leaving the task's other labels be. */
+  swapLabel: (id: string, from: string | undefined, to: string) => [
+    'task',
+    'edit',
+    id,
+    ...(from ? ['--remove-label', from] : []),
+    '--add-label',
+    to,
   ],
   /** Several fields of a task in one edit; a priority cannot be cleared, so a null one is left out. */
   editFields: (id: string, change: { title?: string; status?: string; priority?: string | null; description?: string }) => [
@@ -263,6 +278,7 @@ function toSummary(raw: Record<string, unknown>): TaskSummary {
     status: text(raw.status) ?? '',
     priority: text(raw.priority),
     labels: Array.isArray(raw.labels) ? raw.labels.map(String) : [],
+    parentTaskId: typeof raw.parentTaskId === 'string' ? raw.parentTaskId : null,
     references: Array.isArray(raw.references) ? raw.references.map(String) : [],
     acceptanceCriteriaCompleted: count(raw.acceptanceCriteriaCompleted),
     acceptanceCriteriaCount: count(raw.acceptanceCriteriaCount),

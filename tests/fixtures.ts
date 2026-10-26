@@ -320,8 +320,12 @@ function applyTaskCommand(tasks: FakeTask[], argv: string[]): ProcessRunResult {
   let task: FakeTask | undefined
   let i = 3
   if (isCreate) {
-    const next = 1 + Math.max(0, ...tasks.map(one => Number(/\d+$/.exec(one.id)?.[0] ?? 0)))
-    task = { id: `BL-${next}`, title: argv[2] ?? '', status: 'To Do', references: [] }
+    // A subtask (-p) is numbered under its parent, as Backlog.md does: BL-2.1.
+    const parent = argv[argv.indexOf('-p') + 1]
+    const id = argv.includes('-p')
+      ? `${parent}.${1 + tasks.filter(one => one.parentTaskId === parent).length}`
+      : `BL-${1 + Math.max(0, ...tasks.filter(one => !one.id.includes('.')).map(one => Number(/\d+$/.exec(one.id)?.[0] ?? 0)))}`
+    task = { id, title: argv[2] ?? '', status: 'To Do', references: [], labels: [], ...(argv.includes('-p') ? { parentTaskId: parent } : {}) }
     tasks.push(task)
   } else {
     task = tasks.find(one => one.id === argv[2])
@@ -336,6 +340,9 @@ function applyTaskCommand(tasks: FakeTask[], argv: string[]): ProcessRunResult {
     else if (flag === '-d') task.description = value
     else if (flag === '--ref') task.references = [value]
     else if (flag === '--add-ref') task.references = [...((task.references as string[] | undefined) ?? []), value]
+    else if (flag === '-l') task.labels = value.split(',').map(one => one.trim())
+    else if (flag === '--add-label') task.labels = [...((task.labels as string[] | undefined) ?? []), value]
+    else if (flag === '--remove-label') task.labels = ((task.labels as string[] | undefined) ?? []).filter(one => one !== value)
   }
   // The real CLI stamps the change, to the minute.
   task.updatedAt = '2030-01-01T00:00:00Z'

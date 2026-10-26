@@ -71,7 +71,12 @@ for (const surface of ['terminal', 'desktop', 'vscode'] as const) {
       ['task', 'edit', 'BL-1', '--check-ac', '2'],
     ])
 
+    // + Add criterion opens the field; adding closes it.
+    expect(await ui.find({ key: 'criterion-new' })).toBe(undefined)
+    await ui.press({ key: 'criterion-add' })
     await ui.input({ key: 'criterion-new', text: '  Handles\nnewlines  ' })
+    expect(await ui.find({ key: 'criterion-new' })).toBe(undefined)
+    await ui.press({ key: 'criterion-add' })
     await ui.input({ key: 'criterion-new', text: '  ' })
     expect(edits()[2]).toEqual(['task', 'edit', 'BL-1', '--ac', 'Handles\nnewlines'])
     expect(edits()).toHaveLength(3)
@@ -200,6 +205,8 @@ test('Spanish: editing labels', { options: { language: 'es' } }, async ($, on) =
   expect(picker?.props.label).toBe('Prioridad')
   expect((picker?.props.options as { label: string }[]).map(option => option.label)).toEqual(['Alta', 'Media', 'Baja'])
   expect(await ui.find({ type: 'Text', text: '! prioridad alta' })).toBeDefined()
+  expect((await ui.find({ key: 'criterion-add' }))?.props.label).toBe('+ Añadir criterio')
+  await ui.press({ key: 'criterion-add' })
   expect((await ui.find({ key: 'criterion-new' }))?.props.placeholder).toBe('Nuevo criterio')
   await ui.press({ key: 'criterion-remove-1' })
   expect(await ui.find({ type: 'Text', text: '¿Eliminar el criterio 1?' })).toBeDefined()

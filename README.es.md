@@ -40,11 +40,14 @@ del prompt. El prompt **nunca se envía por ti**.
 - **Nueva tarea.** **+ Nueva tarea** abre un campo para el título. **Cancelar** lo cierra,
   y se cierra solo cuando la tarea se ha creado.
 - **Mover una tarea.** En la vista de la tarea, **◀ estado anterior** y **estado
-  siguiente ▶** (teclas `h` y `l`) la mueven un paso, en todas las superficies. El selector
-  de estado salta a cualquiera.
+  siguiente ▶** (teclas `h` y `l`), a los lados del selector de estado, la mueven un paso, en
+  todas las superficies. El selector salta a cualquiera.
+- **De dónde viene una tarea.** Una tarea sincronizada muestra su petición (*Redmine
+  #44801*, *Jira APP-12*), su tipo, la tarea de la que es subtarea, y si lo que cambies en
+  ella se envía al gestor.
 - **Editar una tarea.** Título, prioridad (de `backlog config get priorities`, si no
-  Alta/Media/Baja) y criterios de aceptación. Puedes marcar, añadir, editar y eliminar
-  criterios; eliminar pide confirmación antes.
+  Alta/Media/Baja) y criterios de aceptación. Puedes marcar, añadir (**+ Añadir
+  criterio**), editar y eliminar criterios; eliminar pide confirmación antes.
 - **Textos largos.** Edita la descripción y el plan de implementación en un campo de varias
   líneas (Claude Code 2.1.301 o posterior), o en tu propio editor en versiones anteriores
   (ver [Editar textos largos](#editar-textos-largos)).
@@ -190,6 +193,22 @@ del tipo *En curso* al tuyo y el resto al primer estado; *Urgente*/*Alta* → Hi
 *Normal* → Medium, *Baja* → Low) y puedes cambiar cualquiera. Una prioridad puesta en
 **— (sin tocar)** no se sincroniza. En modo bidireccional, un estado de Backlog.md al que no
 corresponde ninguno de Redmine no se envía, y el panel lo avisa.
+
+**Tipos y padres.** Con **Tipos y padres** activado (lo predeterminado), cada tarea lleva
+como etiqueta el tipo de su petición (el tipo de Redmine, el tipo de incidencia de Jira:
+*Épica*, *Historia de usuario*, *Error*…), que cambia si cambia el tipo sin tocar el resto
+de etiquetas de la tarea. Una tarea nueva se crea bajo la tarea de la petición de la que
+cuelga, así que las historias de una épica y sus tareas llegan como subtareas (`TASK-2`,
+`TASK-2.1`, `TASK-2.1.1`); los padres siempre se crean primero. Backlog.md solo fija el padre
+de una tarea al crearla, así que las tareas que ya existían se quedan donde están, y una
+petición cuyo padre no entra en la sincronización llega suelta. Va en un solo sentido: las
+etiquetas y padres cambiados en Backlog.md no se envían.
+
+**Descripciones.** Redmine las guarda en Textile salvo que su administrador eligiera
+Markdown. El panel convierte el Textile a Markdown al leer (títulos, negrita, cursiva,
+código, bloques de código, listas, citas, enlaces, imágenes) y de vuelta al escribir, así que
+una descripción que va y vuelve cuenta como no cambiada. Si tu Redmine usa Markdown, elígelo
+en **Formato del texto en Redmine** y no se convierte nada.
 
 **Conflictos.** El panel guarda lo que ambos lados tenían en la última sincronización. Si
 el mismo campo cambió en los dos lados, con valores distintos, no se toca ese campo en
@@ -578,13 +597,15 @@ Tras 5 fallos seguidos, el panel muestra el error y un botón **Reintentar**.
   archivada. El panel no reordena ni renombra estados existentes: para eso, edita la
   configuración.
 - **Redmine:** no se sincronizan los criterios de aceptación, el plan, las notas, los
-  comentarios, los responsables, los tipos, las versiones ni los campos personalizados. Las
-  descripciones pasan tal cual, sin convertir entre el Textile (o Markdown) de Redmine y el
-  Markdown de Backlog.md. Un flujo de trabajo de Redmine puede rechazar un cambio de
+  comentarios, los responsables, las versiones ni los campos personalizados; tipos y padres
+  llegan en un solo sentido, y una tarea conserva el padre con el que se creó. El Textile
+  menos común (tablas, colores, notas al pie) pasa tal cual. Un flujo de trabajo de Redmine puede rechazar un cambio de
   estado; el panel muestra el motivo de Redmine y lo reintenta en la siguiente
   sincronización. Solo sincroniza con el panel abierto.
 - **Jira:** se sincronizan los mismos campos que con Redmine, y quedan fuera los mismos
-  (más sprints, épicas, componentes y etiquetas). Un estado al que el flujo no llega con
+  (más sprints, componentes y las etiquetas propias de Jira); épicas e historias llegan como
+  padres, como arriba. Las descripciones pasan tal cual: el formato wiki de Jira no se
+  convierte. Un estado al que el flujo no llega con
   una sola transición no se envía. Si el proyecto exige campos además del resumen y el
   tipo, crear la incidencia falla y el panel muestra el motivo de Jira. Probado contra un
   Jira simulado, todavía no contra un sitio real.
@@ -621,6 +642,7 @@ hooks/sync.ts                     núcleo puro de la sincronización: fusión a 
 hooks/redmine.ts                  adaptador puro de Redmine: URLs, lectura, correspondencias por defecto, cuerpos de las peticiones
 hooks/jira.ts                     adaptador puro de Jira: Cloud y Data Center, páginas de búsqueda, estados, transiciones, campos
 hooks/csv.ts                      adaptador puro de CSV: codificaciones, lectura, las columnas de la exportación de Redmine
+hooks/textile.ts                  Textile a Markdown y de vuelta, para las descripciones de Redmine
 hooks/base64.ts                   base64 en los dos sentidos (bytes de archivos, autenticación básica de Jira)
 hooks/i18n.ts                     textos en inglés y español, detección del idioma
 types/index.d.ts                  el contrato de $.state, las props del tablero, las formas de Backlog.md

@@ -313,3 +313,21 @@ describe('the only mine view', () => {
     expect([...othersTasks(links, meta, [7, 20])].sort()).toEqual(['BL-3', 'BL-4', 'BL-5'])
   })
 })
+
+describe('parents first', () => {
+  test('a new task comes after the new task it hangs from, whatever the order in the tracker', async () => {
+    const items: RemoteItem[] = [
+      { ...remote('3'), parentKey: '2', type: 'Task' },
+      { ...remote('2'), parentKey: '1', type: 'Story' },
+      { ...remote('9'), parentKey: '404' },
+      { ...remote('1'), type: 'Epic' },
+    ]
+    const planned = plan({ ...BASE, remote: items, local: [], links: {} })
+    expect(planned.actions.map(action => action.kind === 'create-local' && [action.key, action.parentKey, action.type])).toEqual([
+      ['9', '404', undefined],
+      ['1', undefined, 'Epic'],
+      ['2', '1', 'Story'],
+      ['3', '2', 'Task'],
+    ])
+  })
+})

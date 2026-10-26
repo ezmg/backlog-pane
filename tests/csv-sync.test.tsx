@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { CWD, PANE, open, world } from './fixtures'
+import { CWD, PANE, open, openTask, world } from './fixtures'
 import type { FakeTask } from './fixtures'
 
 // The CSV tracker, end to end: a Redmine export on disk, read when the
@@ -51,11 +51,14 @@ test('set up in the pane: pick the CSV tracker and its file, then sync', async (
   // No mode, issues or interval to pick: read only, with the button.
   expect(await ui.find({ key: 'sync-mode' })).toBe(undefined)
   expect(await ui.find({ key: 'sync-interval' })).toBe(undefined)
-  expect(await ui.find({ type: 'Text', text: /^In Redmine: Issues, filter them/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /In Redmine: Issues → CSV/ })).toBeDefined()
   await ui.press({ key: 'sync-now' })
   expect(await ui.find({ type: 'Text', text: 'Type the path of the CSV file Redmine exported.' })).toBeDefined()
   await ui.input({ key: 'sync-file', text: ` ${FILE} ` })
-  expect(await ui.find({ type: 'Text', text: `${FILE} · read only · Only with the button` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^read only · Only with the button/ })).toBeDefined()
+  // The file by its name at the top; its whole path in its field.
+  expect(await ui.find({ type: 'Text', text: ' · issues.csv' })).toBeDefined()
+  expect((await ui.find({ key: 'sync-file' }))?.props.value).toBe(FILE)
   await ui.press({ key: 'sync-now' })
 
   expect(tasks.map(task => [task.title, task.status, task.priority, task.references])).toEqual([
@@ -192,5 +195,83 @@ test('Spanish: the CSV setup', { options: { language: 'es' } }, async ($, on) =>
   expect(
     await ui.find({ type: 'Text', text: 'CSV: 3 peticiones leídas, 3 tareas creadas o actualizadas, 0 conflictos.' }),
   ).toBeDefined()
+  await ui.unmount()
+})
+
+test('types and parents: an epic, its story and the story’s tasks, created parents first', async ($, on) => {
+  // Newest first, as Redmine lists them: the tasks come before their story.
+  const lines = [
+    '#;Tipo;Tarea padre;Estado;Prioridad;Asunto;Descripción',
+    '31;Tarea;20;Nueva;Normal;[iOS] Status;"Steps:\n# Open\n# *Close*"',
+    '30;Tarea;20;En curso;Normal;[Android] Status;',
+    '20;Historia de usuario;10;Nueva;Normal;Status;',
+    '10;Épica;;Nueva;Alta;Release 3;',
+    '40;Tarea;999;Nueva;Normal;Orphan;',
+  ]
+  const { clock, tasks, files, store } = world(on, { isStateful: true, tasks: [], store: settings() })
+  files.set(FILE, csv(lines))
+  await open($, clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'sync-open' })
+  expect((await ui.find({ key: 'sync-structure' }))?.props.value).toBe('on')
+  await ui.press({ key: 'sync-now' })
+
+  const by = (title: string) => tasks.find(task => task.title === title) as FakeTask
+  expect(by('Release 3')).toMatchObject({ labels: ['Épica'] })
+  expect(by('Status')).toMatchObject({ labels: ['Historia de usuario'], parentTaskId: by('Release 3').id })
+  expect(by('[iOS] Status')).toMatchObject({ labels: ['Tarea'], parentTaskId: by('Status').id })
+  expect(by('[Android] Status').parentTaskId).toBe(by('Status').id)
+  // A parent that is not in the file: a task of its own.
+  expect(by('Orphan').parentTaskId).toBe(undefined)
+  // Textile became Markdown.
+  expect(by('[iOS] Status').description).toBe('Steps:\n1. Open\n1. **Close**')
+
+  // The type changes in Redmine: the label follows, other labels stay.
+  ;(by('Orphan').labels as string[]).push('mine')
+  files.set(FILE, csv([lines[0] as string, '40;Error;999;Nueva;Normal;Orphan;']))
+  await ui.press({ key: 'sync-now' })
+  expect(by('Orphan').labels).toEqual(['mine', 'Error'])
+
+  // Switched off: nothing more is labelled.
+  await ui.select({ key: 'sync-structure', value: 'off' })
+  expect((store.get(SYNC_KEY) as { settings: { structure: boolean } }).settings.structure).toBe(false)
+  files.set(FILE, csv([lines[0] as string, '40;Tarea;999;Nueva;Normal;Orphan;', '50;Tarea;;Nueva;Normal;Plain;']))
+  await ui.press({ key: 'sync-now' })
+  expect(by('Orphan').labels).toEqual(['mine', 'Error'])
+  expect(by('Plain').labels).toEqual([])
+  await ui.unmount()
+})
+
+test('a Redmine that keeps Markdown: descriptions are not converted', async ($, on) => {
+  const { clock, tasks, files } = world(on, { isStateful: true, tasks: [], store: settings({ textFormat: 'markdown' }) })
+  files.set(FILE, csv(['#;Asunto;Descripción', '1;A;"# Title\n*it*"']))
+  await open($, clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'sync-open' })
+  expect((await ui.find({ key: 'sync-format' }))?.props.value).toBe('markdown')
+  await ui.press({ key: 'sync-now' })
+  expect(tasks[0]?.description).toBe('# Title\n*it*')
+  await ui.unmount()
+})
+
+test('the task says where it comes from; the integration’s help folds', async ($, on) => {
+  const lines = ['#;Tipo;Tarea padre;Estado;Asunto', '20;Historia de usuario;;Nueva;Status', '31;Tarea;20;Nueva;[iOS] Status']
+  const { clock, tasks, files } = world(on, { isStateful: true, tasks: [], store: settings() })
+  files.set(FILE, csv(lines))
+  await open($, clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'sync-open' })
+  expect(await ui.find({ type: 'Text', text: /^The file’s issues are copied/ })).toBe(undefined)
+  await ui.press({ key: 'sync-help' })
+  expect(await ui.find({ type: 'Text', text: /^The file’s issues are copied/ })).toBeDefined()
+  await ui.press({ key: 'sync-now' })
+  await ui.press({ key: 'sync-back' })
+  await clock.advance(2_000)
+  const child = tasks.find(task => task.title === '[iOS] Status') as FakeTask
+  const parent = tasks.find(task => task.title === 'Status') as FakeTask
+  await openTask(ui, child.id)
+  expect(await ui.find({ type: 'Text', text: `Redmine #31 · Tarea · inside ${parent.id} “Status”` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Read only: what you change here is not sent to Redmine.' })).toBeDefined()
+  expect(await ui.find({ key: 'status-next' })).toBeDefined()
   await ui.unmount()
 })

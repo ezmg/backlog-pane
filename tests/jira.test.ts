@@ -58,6 +58,8 @@ describe('reading answers', () => {
       { key: 'A-1', subject: 'A-1', description: '', statusId: '3', priorityId: null, assigneeId: 'me' },
     ])
     expect(readSearch('<html>')).toBe(undefined)
+    const typed = readSearch(JSON.stringify({ issues: [issue('A-2', { issuetype: { name: 'Story' }, parent: { key: 'A-1' } })] }))
+    expect(typed?.issues[0]).toMatchObject({ type: 'Story', parentKey: 'A-1' })
   })
   test('statuses once each, with their category', async () => {
     const text = JSON.stringify([

@@ -26,6 +26,9 @@ export type JiraIssue = {
   statusId: string
   priorityId: string | null
   assigneeId: string | null
+  /** Its issue type (Epic, Story, Task…) and the issue it hangs from (an epic's story, a story's sub-task). */
+  type?: string
+  parentKey?: string
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -65,7 +68,7 @@ export function issueKeyOf(base: string, url: string): string | undefined {
 export const projectKey = (text: string) => text.trim().toUpperCase()
 
 export const PAGE = 100
-const FIELDS = 'summary,status,priority,description,assignee'
+const FIELDS = 'summary,status,priority,description,assignee,issuetype,parent'
 
 /** Every issue of the project, or only the token owner's, oldest key first. */
 export const jql = (project: string, onlyMine: boolean) =>
@@ -112,6 +115,8 @@ export function readSearch(text: string): { issues: JiraIssue[]; next?: Page } |
     const fields = isRecord(raw.fields) ? raw.fields : {}
     const status = isRecord(fields.status) ? fields.status : {}
     const priority = isRecord(fields.priority) ? fields.priority : {}
+    const type = isRecord(fields.issuetype) ? str(fields.issuetype.name) : undefined
+    const parent = isRecord(fields.parent) ? str(fields.parent.key) : undefined
     const key = str(raw.key)
     const statusId = str(status.id)
     if (!key || !statusId) return []
@@ -123,6 +128,8 @@ export function readSearch(text: string): { issues: JiraIssue[]; next?: Page } |
         statusId,
         priorityId: str(priority.id) ?? null,
         assigneeId: personOf(fields.assignee),
+        ...(type ? { type } : {}),
+        ...(parent ? { parentKey: parent } : {}),
       },
     ]
   })
@@ -240,7 +247,13 @@ export function toRemoteIssue(
     priority: issue.priorityId === null ? null : (priorityMap[issue.priorityId] || '').toLowerCase() || null,
     description: issue.description,
   }
-  return { key: issue.key, url: browseUrl(base, issue.key), fields }
+  return {
+    key: issue.key,
+    url: browseUrl(base, issue.key),
+    fields,
+    ...(issue.type ? { type: issue.type } : {}),
+    ...(issue.parentKey ? { parentKey: issue.parentKey } : {}),
+  }
 }
 
 /**

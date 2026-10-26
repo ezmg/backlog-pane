@@ -10,6 +10,8 @@ export type TaskSummary = {
   status: string
   priority: string | null
   labels: string[]
+  /** The task it is a subtask of, if any. */
+  parentTaskId: string | null
   /** Its references: URLs or paths; a synced task holds its issue's URL here. */
   references: string[]
   acceptanceCriteriaCompleted: number
@@ -76,7 +78,12 @@ export type SyncField = 'title' | 'status' | 'priority' | 'description'
 export type SyncMode = 'read' | 'both'
 
 /** What the last sync agreed on for one linked pair, by the tracker's key. */
-export type SyncLink = { taskId: string; base: SyncFields }
+export type SyncLink = {
+  taskId: string
+  base: SyncFields
+  /** The tracker's type (Epic, Story, Task…) the task carries as a label, once applied. */
+  type?: string
+}
 
 /** One field that changed on both sides since the last sync, kept until the person picks one. */
 export type SyncConflict = {
@@ -103,6 +110,10 @@ export type SyncSettings = {
   file: string
   /** Jira: the issue type new tasks are created as (its id); '' picks Task, or the first. */
   issueType?: string
+  /** Redmine and its CSV: the descriptions' format there; Textile is converted to Markdown and back. */
+  textFormat?: 'textile' | 'markdown'
+  /** Each issue's type as a label, and new tasks created under their parent's (read only). Default on. */
+  structure?: boolean
   mode: SyncMode
   /** Only the issues assigned to the key's owner; new tasks sent to Redmine are assigned to them. */
   onlyMine: boolean
@@ -157,6 +168,7 @@ declare module 'claude-code' {
       prefsKey: string | null
       sync: SyncView
       isManagingSync: boolean
+      isSyncHelpOpen: boolean
     }
   }
 }

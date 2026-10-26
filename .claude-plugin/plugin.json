@@ -1,6 +1,6 @@
 {
   "name": "backlog-pane",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "A live Backlog.md board in a Claude Code side pane (unofficial).",
   "author": {
     "name": "Velkyss"

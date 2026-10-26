@@ -23,8 +23,12 @@ export type Conflict = SyncConflict
 export type Link = SyncLink
 export type { SyncMode }
 
-/** An item of the tracker. `skip`: fields it does not carry (a CSV without that column), left alone. */
-export type RemoteItem = { key: string; url: string; fields: Fields; skip?: readonly SyncField[] }
+/**
+ * An item of the tracker. `skip`: fields it does not carry (a CSV without
+ * that column), left alone. `type` and `parentKey`: its type (Epic, Story…)
+ * and the item it hangs from, when the tracker says.
+ */
+export type RemoteItem = { key: string; url: string; fields: Fields; skip?: readonly SyncField[]; type?: string; parentKey?: string }
 
 /**
  * A Backlog.md task as the list shows it. `description` is undefined when
@@ -35,7 +39,7 @@ export type LocalItem = { id: string; references: string[]; fields: Omit<Fields,
 export type Change = Partial<Fields>
 
 export type Action =
-  | { kind: 'create-local'; key: string; url: string; fields: Fields }
+  | { kind: 'create-local'; key: string; url: string; fields: Fields; type?: string; parentKey?: string }
   | { kind: 'update-local'; key: string; taskId: string; change: Change }
   | { kind: 'create-remote'; taskId: string; fields: Fields }
   | { kind: 'update-remote'; key: string; taskId: string; change: Change }
@@ -109,7 +113,7 @@ export function plan(input: {
     }
     const task = link ? byId.get(link.taskId) : undefined
     if (!link || !task) {
-      actions.push({ kind: 'create-local', key: item.key, url: item.url, fields: item.fields })
+      actions.push({ kind: 'create-local', key: item.key, url: item.url, fields: item.fields, type: item.type, parentKey: item.parentKey })
       links[item.key] = { taskId: '', base: item.fields }
       continue
     }
@@ -144,7 +148,7 @@ export function plan(input: {
     if (Object.keys(toRemote).length > 0) {
       actions.push({ kind: 'update-remote', key: item.key, taskId: task.id, change: toRemote })
     }
-    links[item.key] = { taskId: task.id, base: agreed as Fields }
+    links[item.key] = { ...link, taskId: task.id, base: agreed as Fields }
   }
 
   // Links whose issue is gone from the tracker's list (deleted, moved, out
@@ -169,7 +173,32 @@ export function plan(input: {
       })
     }
   }
-  return { actions, links, conflicts }
+  return { actions: parentsFirst(actions, input.remote), links, conflicts }
+}
+
+/**
+ * The actions with every new task after the new task it hangs from: a
+ * subtask is created under its parent, which must exist by then. The rest
+ * keep their order.
+ */
+function parentsFirst(actions: Action[], remote: RemoteItem[]): Action[] {
+  const parentOf = new Map(remote.map(item => [item.key, item.parentKey]))
+  const depth = (key: string) => {
+    let level = 0
+    const seen = new Set<string>()
+    for (let at = parentOf.get(key); at && parentOf.has(at) && !seen.has(at); at = parentOf.get(at)) {
+      seen.add(at)
+      level++
+    }
+    return level
+  }
+  const creates = actions.filter(action => action.kind === 'create-local')
+  const rest = actions.filter(action => action.kind !== 'create-local')
+  const sorted = creates
+    .map((action, i) => ({ action, i, level: depth(action.key) }))
+    .sort((a, b) => a.level - b.level || a.i - b.i)
+    .map(one => one.action)
+  return [...sorted, ...rest]
 }
 
 /** The fields a change touches, in a fixed order, for messages and tests. */
@@ -192,6 +221,8 @@ export function readSyncStore(value: unknown): { settings: SyncSettings | null; 
           project: typeof s.project === 'string' ? s.project : '',
           file: typeof s.file === 'string' ? s.file : '',
           issueType: typeof s.issueType === 'string' ? s.issueType : '',
+          textFormat: s.textFormat === 'markdown' ? 'markdown' : 'textile',
+          structure: s.structure !== false,
           mode: s.mode === 'both' ? 'both' : 'read',
           onlyMine: s.onlyMine === true,
           view: s.view === 'mine' ? 'mine' : 'all',

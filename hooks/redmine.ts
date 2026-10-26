@@ -15,6 +15,9 @@ export type RedmineIssue = {
   statusId: number
   priorityId: number | null
   assigneeId: number | null
+  /** Its tracker (Bug, Feature, Epic…) and the issue it hangs from. */
+  type?: string
+  parentId?: number
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -76,6 +79,8 @@ export function readIssues(text: string): { issues: RedmineIssue[]; total: numbe
     const status = isRecord(raw.status) ? raw.status : {}
     const priority = isRecord(raw.priority) ? raw.priority : {}
     const assignee = isRecord(raw.assigned_to) ? raw.assigned_to : {}
+    const tracker = isRecord(raw.tracker) ? raw.tracker : {}
+    const parent = isRecord(raw.parent) ? raw.parent : {}
     if (typeof raw.id !== 'number' || typeof status.id !== 'number') return []
     return [
       {
@@ -85,6 +90,8 @@ export function readIssues(text: string): { issues: RedmineIssue[]; total: numbe
         statusId: status.id,
         priorityId: typeof priority.id === 'number' ? priority.id : null,
         assigneeId: typeof assignee.id === 'number' ? assignee.id : null,
+        ...(typeof tracker.name === 'string' ? { type: tracker.name } : {}),
+        ...(typeof parent.id === 'number' ? { parentId: parent.id } : {}),
       },
     ]
   })
@@ -189,7 +196,13 @@ export function toRemoteItem(
     priority: issue.priorityId === null ? null : (priorityMap[String(issue.priorityId)] || '').toLowerCase() || null,
     description: issue.description,
   }
-  return { key: String(issue.id), url: issueUrl(base, issue.id), fields }
+  return {
+    key: String(issue.id),
+    url: issueUrl(base, issue.id),
+    fields,
+    ...(issue.type ? { type: issue.type } : {}),
+    ...(issue.parentId ? { parentKey: String(issue.parentId) } : {}),
+  }
 }
 
 /**
