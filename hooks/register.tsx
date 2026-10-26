@@ -61,7 +61,7 @@ import {
 } from './redmine'
 import type { RedminePriority, RedmineStatus } from './redmine'
 import { EMPTY_SYNC, needsRead, othersTasks, plan, readSyncStore } from './sync'
-import type { Action, Change, LocalItem } from './sync'
+import type { Action, Change, LocalItem, RemoteItem } from './sync'
 import { decodeText, fromBase64, prioritiesOf, readExport, refFor, statusesOf, toRemoteRow } from './csv'
 import type { Language, Strings } from './i18n'
 
@@ -353,7 +353,16 @@ async function readLocal($: Engine, data: SyncData, issueRefs: ReadonlySet<strin
   return local
 }
 
-/** Runs a create or edit in Backlog.md; on a failure the link stays as it was, to try again. */
+/** A tracker's type as a Backlog.md label: no commas, which separate labels. */
+const labelOf = (type: string | undefined) => type?.replace(/,/g, ' ').trim() || undefined
+
+/**
+ * Runs a create or edit in Backlog.md; on a failure the link stays as it
+ * was, to try again. With `isStructured`, a new task carries its type as a
+ * label and is created under its parent's task, when that one is linked
+ * (the plan creates parents first). Backlog.md sets a parent only at
+ * creation, so a task made before keeps its place.
+ */
 async function applyLocal(
   $: Engine,
   action: Extract<Action, { kind: 'create-local' | 'update-local' }>,
@@ -361,12 +370,15 @@ async function applyLocal(
   data: SyncData,
   warnings: string[],
   t: Strings,
+  isStructured = false,
 ): Promise<boolean> {
   if (action.kind === 'create-local') {
-    const run = await backlog($, args.createFrom(action.fields, action.url))
+    const label = isStructured ? labelOf(action.type) : undefined
+    const parent = isStructured && action.parentKey ? links[action.parentKey]?.taskId || undefined : undefined
+    const run = await backlog($, args.createFrom(action.fields, action.url, { label, parent }))
     const id = run.ok ? createdId(run.stdout) : undefined
     if (id) {
-      links[action.key] = { taskId: id, base: action.fields }
+      links[action.key] = { taskId: id, base: action.fields, ...(label ? { type: label } : {}) }
       return true
     }
     delete links[action.key]
@@ -521,7 +533,7 @@ async function syncJira($: Engine, settings: SyncSettings, base: string, t: Stri
   let toRemote = 0
   for (const action of planned.actions) {
     if (action.kind === 'create-local' || action.kind === 'update-local') {
-      if (await applyLocal($, action, links, data, warnings, t)) fromRemote++
+      if (await applyLocal($, action, links, data, warnings, t, settings.structure !== false)) fromRemote++
     } else if (action.kind === 'update-remote') {
       const old = data.links[action.key]?.base
       const link = links[action.key]
@@ -565,6 +577,7 @@ async function syncJira($: Engine, settings: SyncSettings, base: string, t: Stri
     }
   }
 
+  await applyTypes($, remote, links, settings.structure !== false, warnings, t)
   const now = new Date(await $.clock.now()).toISOString()
   await saveSync($, current => ({
     settings: current.settings ? { ...current.settings, statusMap, priorityMap } : current.settings,
@@ -637,9 +650,10 @@ async function syncCsv($: Engine, settings: SyncSettings, base: string | undefin
   let fromRemote = 0
   for (const action of planned.actions) {
     if (action.kind !== 'create-local' && action.kind !== 'update-local') continue
-    if (await applyLocal($, action, links, data, warnings, t)) fromRemote++
+    if (await applyLocal($, action, links, data, warnings, t, settings.structure !== false)) fromRemote++
   }
 
+  await applyTypes($, remote, links, settings.structure !== false, warnings, t)
   const now = new Date(await $.clock.now()).toISOString()
   await saveSync($, current => ({
     settings: current.settings ? { ...current.settings, statusMap, priorityMap } : current.settings,
@@ -655,6 +669,30 @@ async function syncCsv($: Engine, settings: SyncSettings, base: string | undefin
   }))
   await update($, notice, () => t.csvDone(file.rows.length, fromRemote, planned.conflicts.length))
   return undefined
+}
+
+/**
+ * Keeps each linked task's type label in step with its issue's type: the
+ * old one swapped for the new, the task's other labels left be. Read only:
+ * a label changed in Backlog.md is not sent.
+ */
+async function applyTypes(
+  $: Engine,
+  remote: RemoteItem[],
+  links: Record<string, SyncLink>,
+  isStructured: boolean,
+  warnings: string[],
+  t: Strings,
+) {
+  if (!isStructured) return
+  for (const item of remote) {
+    const label = labelOf(item.type)
+    const link = links[item.key]
+    if (!label || !link?.taskId || link.type === label) continue
+    const run = await backlog($, args.swapLabel(link.taskId, link.type, label))
+    if (run.ok) links[item.key] = { ...link, type: label }
+    else warnings.push(t.localFailed(link.taskId, errorLine(run.stderr, '?')))
+  }
 }
 
 /** One sync with Redmine; answers what went wrong, if it could not run. */
@@ -719,7 +757,7 @@ async function syncOnce($: Engine, settings: SyncSettings, base: string, t: Stri
   let toRemote = 0
   for (const action of planned.actions) {
     if (action.kind === 'create-local' || action.kind === 'update-local') {
-      if (await applyLocal($, action, links, data, warnings, t)) fromRemote++
+      if (await applyLocal($, action, links, data, warnings, t, settings.structure !== false)) fromRemote++
     } else if (action.kind === 'update-remote') {
       const body = issueBody(toRedmineText(settings, action.change), maps, lists, meta[action.key])
       const old = data.links[action.key]?.base
@@ -759,6 +797,7 @@ async function syncOnce($: Engine, settings: SyncSettings, base: string, t: Stri
     }
   }
 
+  await applyTypes($, remote, links, settings.structure !== false, warnings, t)
   const now = new Date(await $.clock.now()).toISOString()
   await saveSync($, current => ({
     settings: current.settings ? { ...current.settings, statusMap, priorityMap } : current.settings,
@@ -1724,6 +1763,18 @@ export const register: Register = (on, options) => {
                     />
                   ) : null}
                 </Box>
+              ) : null}
+              {Select ? (
+                <Select
+                  key="sync-structure"
+                  label={t.structure}
+                  value={settings.structure === false ? 'off' : 'on'}
+                  options={[
+                    { value: 'on', label: t.structureOn },
+                    { value: 'off', label: t.structureOff },
+                  ]}
+                  onSelect={value => setSyncSettings($, { structure: value === 'on' })}
+                />
               ) : null}
               {isCsv ? (
                 <Text dimColor>

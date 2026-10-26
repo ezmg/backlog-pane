@@ -254,6 +254,9 @@ const en = {
     'Issues are copied into Backlog.md as tasks (with the issue’s URL in their references) and kept in step field by field: title, status, priority and description. Read only never writes to Redmine. Nothing is ever deleted on either side.',
   trackerJira: 'Jira (API)',
   textFormat: 'Text format in Redmine',
+  structure: 'Types and parents',
+  structureOn: 'Type as a label; new tasks under their parent',
+  structureOff: 'Leave them out',
   issueType: 'Issue type for new tasks',
   issueTypeAuto: 'Task, or the first',
   noTransition: (task: string, status: string) =>
@@ -476,6 +479,9 @@ const es: Strings = {
     'Las peticiones se copian en Backlog.md como tareas (con la URL de la petición en sus referencias) y se mantienen al día campo a campo: título, estado, prioridad y descripción. Solo lectura nunca escribe en Redmine. Nunca se borra nada en ningún lado.',
   trackerJira: 'Jira (API)',
   textFormat: 'Formato del texto en Redmine',
+  structure: 'Tipos y padres',
+  structureOn: 'Tipo como etiqueta; tareas nuevas bajo su padre',
+  structureOff: 'No usarlos',
   issueType: 'Tipo de incidencia para las tareas nuevas',
   issueTypeAuto: 'Tarea, o la primera',
   noTransition: (task, status) =>

@@ -76,7 +76,12 @@ export type SyncField = 'title' | 'status' | 'priority' | 'description'
 export type SyncMode = 'read' | 'both'
 
 /** What the last sync agreed on for one linked pair, by the tracker's key. */
-export type SyncLink = { taskId: string; base: SyncFields }
+export type SyncLink = {
+  taskId: string
+  base: SyncFields
+  /** The tracker's type (Epic, Story, Task…) the task carries as a label, once applied. */
+  type?: string
+}
 
 /** One field that changed on both sides since the last sync, kept until the person picks one. */
 export type SyncConflict = {
@@ -105,6 +110,8 @@ export type SyncSettings = {
   issueType?: string
   /** Redmine and its CSV: the descriptions' format there; Textile is converted to Markdown and back. */
   textFormat?: 'textile' | 'markdown'
+  /** Each issue's type as a label, and new tasks created under their parent's (read only). Default on. */
+  structure?: boolean
   mode: SyncMode
   /** Only the issues assigned to the key's owner; new tasks sent to Redmine are assigned to them. */
   onlyMine: boolean

@@ -400,3 +400,21 @@ test('Spanish: the integration view', { options: { language: 'es', redmineApiKey
   expect(await ui.find({ type: 'Text', text: 'Redmine: 0 desde Redmine, 0 hacia Redmine, 0 conflictos.' })).toBeDefined()
   await ui.unmount()
 })
+
+test('types and parents from the API: trackers as labels, subtasks under their parent; Textile converted', WITH_KEY, async ($, on) => {
+  const redmine = fakeRedmine({
+    issues: [
+      { id: 7, subject: 'Child', description: '* *one*\n* two', status: 1, priority: 2, tracker: 'Bug', parent: 5 },
+      { id: 5, subject: 'Parent', description: 'h2. Plan', status: 1, priority: 2, tracker: 'Feature' },
+    ],
+  })
+  const { clock, tasks } = world(on, { isStateful: true, tasks: [], http: redmine.http, store: settings() })
+  await open($, clock)
+  const parent = tasks.find(task => task.title === 'Parent') as FakeTask
+  expect(parent).toMatchObject({ labels: ['Feature'], description: '## Plan' })
+  expect(tasks.find(task => task.title === 'Child')).toMatchObject({
+    labels: ['Bug'],
+    parentTaskId: parent.id,
+    description: '- **one**\n- two',
+  })
+})

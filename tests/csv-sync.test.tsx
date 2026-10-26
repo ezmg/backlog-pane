@@ -194,3 +194,59 @@ test('Spanish: the CSV setup', { options: { language: 'es' } }, async ($, on) =>
   ).toBeDefined()
   await ui.unmount()
 })
+
+test('types and parents: an epic, its story and the story’s tasks, created parents first', async ($, on) => {
+  // Newest first, as Redmine lists them: the tasks come before their story.
+  const lines = [
+    '#;Tipo;Tarea padre;Estado;Prioridad;Asunto;Descripción',
+    '31;Tarea;20;Nueva;Normal;[iOS] Status;"Steps:\n# Open\n# *Close*"',
+    '30;Tarea;20;En curso;Normal;[Android] Status;',
+    '20;Historia de usuario;10;Nueva;Normal;Status;',
+    '10;Épica;;Nueva;Alta;Release 3;',
+    '40;Tarea;999;Nueva;Normal;Orphan;',
+  ]
+  const { clock, tasks, files, store } = world(on, { isStateful: true, tasks: [], store: settings() })
+  files.set(FILE, csv(lines))
+  await open($, clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'sync-open' })
+  expect((await ui.find({ key: 'sync-structure' }))?.props.value).toBe('on')
+  await ui.press({ key: 'sync-now' })
+
+  const by = (title: string) => tasks.find(task => task.title === title) as FakeTask
+  expect(by('Release 3')).toMatchObject({ labels: ['Épica'] })
+  expect(by('Status')).toMatchObject({ labels: ['Historia de usuario'], parentTaskId: by('Release 3').id })
+  expect(by('[iOS] Status')).toMatchObject({ labels: ['Tarea'], parentTaskId: by('Status').id })
+  expect(by('[Android] Status').parentTaskId).toBe(by('Status').id)
+  // A parent that is not in the file: a task of its own.
+  expect(by('Orphan').parentTaskId).toBe(undefined)
+  // Textile became Markdown.
+  expect(by('[iOS] Status').description).toBe('Steps:\n1. Open\n1. **Close**')
+
+  // The type changes in Redmine: the label follows, other labels stay.
+  ;(by('Orphan').labels as string[]).push('mine')
+  files.set(FILE, csv([lines[0] as string, '40;Error;999;Nueva;Normal;Orphan;']))
+  await ui.press({ key: 'sync-now' })
+  expect(by('Orphan').labels).toEqual(['mine', 'Error'])
+
+  // Switched off: nothing more is labelled.
+  await ui.select({ key: 'sync-structure', value: 'off' })
+  expect((store.get(SYNC_KEY) as { settings: { structure: boolean } }).settings.structure).toBe(false)
+  files.set(FILE, csv([lines[0] as string, '40;Tarea;999;Nueva;Normal;Orphan;', '50;Tarea;;Nueva;Normal;Plain;']))
+  await ui.press({ key: 'sync-now' })
+  expect(by('Orphan').labels).toEqual(['mine', 'Error'])
+  expect(by('Plain').labels).toEqual([])
+  await ui.unmount()
+})
+
+test('a Redmine that keeps Markdown: descriptions are not converted', async ($, on) => {
+  const { clock, tasks, files } = world(on, { isStateful: true, tasks: [], store: settings({ textFormat: 'markdown' }) })
+  files.set(FILE, csv(['#;Asunto;Descripción', '1;A;"# Title\n*it*"']))
+  await open($, clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'sync-open' })
+  expect((await ui.find({ key: 'sync-format' }))?.props.value).toBe('markdown')
+  await ui.press({ key: 'sync-now' })
+  expect(tasks[0]?.description).toBe('# Title\n*it*')
+  await ui.unmount()
+})

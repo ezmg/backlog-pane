@@ -41,12 +41,14 @@ describe('parsing', () => {
   test('the columns, by their headers in English or Spanish', async () => {
     expect(columnsOf(['#', 'Project', 'Tracker', 'Status', 'Priority', 'Subject', 'Closed', 'Description'])).toEqual({
       id: 0,
+      type: 2,
       status: 3,
       priority: 4,
       title: 5,
       closed: 6,
       description: 7,
     })
+    expect(columnsOf(['#', 'Tipo', 'Tarea padre', 'Estado'])).toEqual({ id: 0, type: 1, parent: 2, status: 3 })
     expect(columnsOf(['#', 'Proyecto', 'Estado', 'Prioridad', 'Asunto', 'Cerrada', 'Descripción'])).toEqual({
       id: 0,
       status: 2,
@@ -94,7 +96,7 @@ describe('the export', () => {
     expect('rows' in file && file.skip).toEqual(['status', 'priority', 'description'])
   })
   test('a row in Backlog.md terms, named by its URL when Redmine’s is known', async () => {
-    const row = { id: 12, subject: 'A', status: 'Nueva', priority: 'Alta', description: 'D', isClosed: false }
+    const row = { id: 12, subject: 'A', status: 'Nueva', priority: 'Alta', description: 'D', isClosed: false, type: '', parentId: null }
     expect(toRemoteRow(undefined, row, [], { Nueva: 'To Do' }, { Alta: 'High' }, 'To Do')).toEqual({
       key: '12',
       url: '#12',

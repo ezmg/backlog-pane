@@ -178,6 +178,21 @@ the rest in the first status; *Urgent*/*High* → High, *Normal* → Medium, *Lo
 you change any of them. A priority set to **— (left alone)** is not synced. In both-ways
 mode, a Backlog.md status that no Redmine one maps to is not sent, and the pane says so.
 
+**Types and parents.** With **Types and parents** on (the default), each task carries its
+issue's type (Redmine's tracker, Jira's issue type: *Epic*, *User story*, *Bug*…) as a
+label, swapped when the type changes, the task's other labels left be. A new task is
+created under the task of the issue it hangs from, so an epic's stories and their tasks
+come in as subtasks (`TASK-2`, `TASK-2.1`, `TASK-2.1.1`); parents are always created first.
+Backlog.md sets a task's parent only when it creates it, so tasks that were already there
+keep their place, and an issue whose parent is not in the sync comes in on its own. This
+goes one way only: labels and parents changed in Backlog.md are not sent.
+
+**Descriptions.** Redmine keeps them in Textile unless its administrator chose Markdown.
+The pane converts Textile to Markdown when it reads (headings, bold, italic, code, code
+blocks, lists, quotes, links, images) and back when it writes, so a description that went
+out and came back counts as unchanged. If your Redmine uses Markdown, pick it in **Text
+format in Redmine**, and nothing is converted.
+
 **Conflicts.** The pane keeps what both sides agreed at the last sync. When the same field
 changed on both sides, to different values, neither side is touched for that field: the
 board shows *1 conflict*, and **Integration…** shows both values with **Use Redmine's** and
@@ -545,13 +560,15 @@ the pane shows the error and a **Retry** button.
   line, and a comment on those lines is lost. Task counts leave out drafts and archived
   tasks, so a status an archived task is in can still be deleted. The pane does not
   reorder or rename existing statuses: edit the config for that.
-- **Redmine:** acceptance criteria, the plan, notes, comments, assignees, trackers,
-  versions and custom fields are not synced. Descriptions go across as they are, with no
-  conversion between Redmine's Textile (or Markdown) and Backlog.md's Markdown. A Redmine
+- **Redmine:** acceptance criteria, the plan, notes, comments, assignees, versions and
+  custom fields are not synced; types and parents come in one way only, and a task keeps
+  the parent it was created with. Textile beyond the common constructs (tables, colours,
+  footnotes) passes as it is. A Redmine
   workflow can refuse a status change; the pane shows Redmine's reason and tries again on
   the next sync. The sync runs only while the pane is open.
 - **Jira:** the same fields as Redmine's are synced, and the same are not (plus sprints,
-  epics, components and labels). A status the workflow can't reach in one transition is
+  components and Jira's own labels); epics and stories come in as parents, as above.
+  Descriptions pass as they are: Jira's wiki markup is not converted. A status the workflow can't reach in one transition is
   not sent. Required fields beyond the summary and the issue type make creating an issue
   fail; the pane shows Jira's reason. Tested against a Jira in memory, not a real site
   yet.
@@ -587,6 +604,7 @@ hooks/sync.ts                     pure sync core: three-way merge per field, the
 hooks/redmine.ts                  pure Redmine adapter: URLs, parsing, default mappings, issue bodies
 hooks/jira.ts                     pure Jira adapter: Cloud and Data Center, search pages, statuses, transitions, fields
 hooks/csv.ts                      pure CSV adapter: encodings, parsing, Redmine's export columns
+hooks/textile.ts                  Textile to Markdown and back, for Redmine's descriptions
 hooks/base64.ts                   base64 both ways (file bytes, Jira's basic authentication)
 hooks/i18n.ts                     English and Spanish strings, language detection
 types/index.d.ts                  the $.state contract, the board's props, Backlog.md shapes

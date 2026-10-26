@@ -99,6 +99,8 @@ const HEADERS = {
   priority: /^(priority|prioridad|priorite|prioritat|priorita|prioridade|prioritat)$/,
   description: /^(description|descripcion|beschreibung|descrizione|descricao|descripcio)$/,
   closed: /^(closed|cerrada|cerrado|fecha de cierre|ferme|fermee|geschlossen|chiusa|fechada|tancada)$/,
+  type: /^(tracker|tipo|type|typ|tipus)$/,
+  parent: /^(parent task|parent|tarea padre|tache parente|ubergeordnete aufgabe|attivita padre|tarefa pai|tasca pare)$/,
 } as const
 
 export type Column = keyof typeof HEADERS
@@ -116,7 +118,16 @@ export function columnsOf(headers: string[]): Columns {
   return columns
 }
 
-export type ExportRow = { id: number; subject: string; status: string; priority: string; description: string; isClosed: boolean }
+export type ExportRow = {
+  id: number
+  subject: string
+  status: string
+  priority: string
+  description: string
+  isClosed: boolean
+  type: string
+  parentId: number | null
+}
 
 export type Export = {
   headers: string[]
@@ -146,6 +157,8 @@ export function readExport(text: string): Export | { headers: string[] } {
         priority: cell(line, 'priority'),
         description: columns.description === undefined ? '' : (line[columns.description] ?? '').replace(/\r\n/g, '\n'),
         isClosed: cell(line, 'closed') !== '',
+        type: cell(line, 'type'),
+        parentId: Number(cell(line, 'parent').replace(/^#/, '')) || null,
       },
     ]
   })
@@ -194,5 +207,12 @@ export function toRemoteRow(
     priority: (priorityMap[row.priority] || '').toLowerCase() || null,
     description: row.description,
   }
-  return { key: String(row.id), url: refFor(base, row.id), fields, skip }
+  return {
+    key: String(row.id),
+    url: refFor(base, row.id),
+    fields,
+    skip,
+    ...(row.type ? { type: row.type } : {}),
+    ...(row.parentId ? { parentKey: String(row.parentId) } : {}),
+  }
 }

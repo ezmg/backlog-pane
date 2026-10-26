@@ -16,6 +16,8 @@ export type FakeIssue = {
   status: number
   priority: number
   assignee?: number
+  tracker?: string
+  parent?: number
 }
 
 export const STATUSES = [
@@ -67,6 +69,8 @@ export function fakeRedmine(options: { project?: string; issues?: FakeIssue[]; r
           status: { id: issue.status, name: STATUSES.find(one => one.id === issue.status)?.name },
           priority: { id: issue.priority, name: PRIORITIES.find(one => one.id === issue.priority)?.name },
           ...(issue.assignee === undefined ? {} : { assigned_to: { id: issue.assignee, name: `User ${issue.assignee}` } }),
+          ...(issue.tracker ? { tracker: { id: 1, name: issue.tracker } } : {}),
+          ...(issue.parent ? { parent: { id: issue.parent } } : {}),
         })),
         total_count: all.length,
         offset,
