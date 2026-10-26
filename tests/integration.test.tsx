@@ -151,7 +151,7 @@ test('only mine: just the issues assigned to the key’s owner; a new task is as
   await ui.press({ key: 'sync-open' })
   expect((await ui.find({ key: 'sync-scope' }))?.props.value).toBe('all')
   await ui.select({ key: 'sync-scope', value: 'mine' })
-  expect(await ui.find({ type: 'Text', text: /· both ways · only mine$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^both ways · Every 5 min · only mine/ })).toBeDefined()
   expect(requests.filter(one => one.url.includes('assigned_to_id=me'))).toHaveLength(0)
 
   // Issue 2 is no longer listed: its task stays as it was, and is not sent back as new.
@@ -379,7 +379,8 @@ test('mobile: syncs and settles conflicts; the setup needs fields', WITH_KEY, as
   const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
   await ui.press({ key: 'sync-open' })
   expect(await ui.find({ key: 'sync-url' })).toBe(undefined)
-  expect(await ui.find({ type: 'Text', text: /redmine\.test · demo · read only/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /redmine\.test · demo$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^read only · Every 5 min/ })).toBeDefined()
   expect(await ui.find({ key: 'sync-now' })).toBeDefined()
   await ui.unmount()
 })

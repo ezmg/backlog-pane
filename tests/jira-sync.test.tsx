@@ -69,7 +69,7 @@ test('set up in the pane: pick Jira, its URL and project key, then sync', CLOUD_
   expect((await ui.find({ key: 'sync-status-10001' }))?.props.value).toBe('In Progress')
   expect((await ui.find({ key: 'sync-priority-1' }))?.props.value).toBe('high')
   expect((await ui.find({ key: 'sync-priority-5' }))?.props.value).toBe('low')
-  expect(await ui.find({ type: 'Text', text: 'Jira status → Backlog.md status' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Jira statuses → board columns' })).toBeDefined()
   await ui.unmount()
 })
 

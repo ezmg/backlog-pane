@@ -278,6 +278,7 @@ function toSummary(raw: Record<string, unknown>): TaskSummary {
     status: text(raw.status) ?? '',
     priority: text(raw.priority),
     labels: Array.isArray(raw.labels) ? raw.labels.map(String) : [],
+    parentTaskId: typeof raw.parentTaskId === 'string' ? raw.parentTaskId : null,
     references: Array.isArray(raw.references) ? raw.references.map(String) : [],
     acceptanceCriteriaCompleted: count(raw.acceptanceCriteriaCompleted),
     acceptanceCriteriaCount: count(raw.acceptanceCriteriaCount),

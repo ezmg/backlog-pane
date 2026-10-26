@@ -105,6 +105,7 @@ const sync = atom(
   { settings: null, data: EMPTY_SYNC, isSyncing: false } as SyncView,
 )
 const isManagingSync = atom({ plugin: 'backlog-pane', key: 'isManagingSync' } as const, false)
+const isSyncHelpOpen = atom({ plugin: 'backlog-pane', key: 'isSyncHelpOpen' } as const, false)
 
 type Run = { ok: true; stdout: string } | { ok: false; stderr: string }
 
@@ -1525,14 +1526,21 @@ export const register: Register = (on, options) => {
 
     const isMultiline = Input ? await hasMultiline($) : false
     const shownBody = (body: string | null) =>
-      body?.trim() ? <Markdown text={body} /> : <Text dimColor>{t.none}</Text>
+      body?.trim() ? <Markdown text={body} /> : <Text dimColor>{t.noneYet}</Text>
+    // A section's title, set apart by a rule.
+    const ruled = (text: string) => (
+      <Text>
+        <Text dimColor>── </Text>
+        <Text bold>{text}</Text>
+      </Text>
+    )
     // A description or plan, with a way to edit it where the surface has
     // fields: inline from 2.1.301, else in the person's editor.
     const section = (title: string, body: string | null, id: string, field: LongField, now: string | null) => {
       if (!Input) {
         return (
           <Box flexDirection="column">
-            <Text bold>{title}</Text>
+            {ruled(title)}
             {shownBody(body)}
           </Box>
         )
@@ -1541,7 +1549,7 @@ export const register: Register = (on, options) => {
         return (
           <Box flexDirection="column">
             <Box flexDirection="row" gap={1}>
-              <Text bold>{title}</Text>
+              {ruled(title)}
               <Button key={`editor-${field}`} plain dimColor label={t.openInEditor} onPress={() => openInEditor($, id, field)} />
             </Box>
             {shownBody(body)}
@@ -1551,7 +1559,7 @@ export const register: Register = (on, options) => {
       if (now === field) {
         return (
           <Box flexDirection="column">
-            <Text bold>{title}</Text>
+            {ruled(title)}
             <Input
               key={`${field}-input`}
               rows={8}
@@ -1570,7 +1578,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" gap={1}>
-            <Text bold>{title}</Text>
+            {ruled(title)}
             <Button key={`edit-${field}`} plain dimColor label={t.edit} onPress={() => update($, editing, () => field)} />
           </Box>
           {shownBody(body)}
@@ -1631,6 +1639,49 @@ export const register: Register = (on, options) => {
       const hasKey = isJira ? !!jiraToken && !needsEmail : !!redmineKey
       const trackerName = (provider: string | undefined) =>
         provider === 'csv' ? t.trackerCsv : provider === 'jira' ? t.trackerJira : provider === 'redmine' ? t.trackerRedmine : t.noTracker
+      const isHelpOpen = await read($, isSyncHelpOpen)
+      // A section's title, and a setting's one-line explanation under it.
+      const heading = (text: string) => (
+        <Text>
+          <Text dimColor>── </Text>
+          <Text bold>{text}</Text>
+        </Text>
+      )
+      const hint = (text: string) => (
+        <Box paddingLeft={2}>
+          <Text dimColor>{text}</Text>
+        </Box>
+      )
+      // The file by its name alone: its whole path is in its field below.
+      const where = settings
+        ? isCsv
+          ? settings.file.split(/[\\/]/).pop() || '—'
+          : [settings.url || '—', settings.project || '—'].join(' · ')
+        : ''
+      const how = settings
+        ? isCsv
+          ? [t.readOnlyShort, t.manualOnly]
+          : [
+              settings.mode === 'both' ? t.bothShort : t.readOnlyShort,
+              settings.intervalMin > 0 ? t.everyMinutes(settings.intervalMin) : t.manualOnly,
+              ...(settings.onlyMine ? [t.mineShort] : []),
+            ]
+        : []
+      const formatSelect = settings && Select && !isJira ? (
+        <Box flexDirection="column">
+          <Select
+            key="sync-format"
+            label={t.textFormat}
+            value={settings.textFormat ?? 'textile'}
+            options={[
+              { value: 'textile', label: 'Textile' },
+              { value: 'markdown', label: 'Markdown' },
+            ]}
+            onSelect={value => setSyncSettings($, { textFormat: value === 'markdown' ? 'markdown' : 'textile' })}
+          />
+          {hint(t.textFormatHint)}
+        </Box>
+      ) : null
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="row" gap={1}>
@@ -1638,76 +1689,122 @@ export const register: Register = (on, options) => {
             <Text bold>{t.integrationTitle}</Text>
           </Box>
           {footer}
-          {Select ? (
-            <Select
-              key="sync-tracker"
-              label={t.tracker}
-              value={settings?.provider ?? 'none'}
-              options={[
-                { value: 'none', label: t.noTracker },
-                { value: 'redmine', label: t.trackerRedmine },
-                { value: 'jira', label: t.trackerJira },
-                { value: 'csv', label: t.trackerCsv },
-              ]}
-              onSelect={value => setTracker($, value)}
-            />
-          ) : (
-            <Text>
-              {t.tracker}: {trackerName(settings?.provider)}
-            </Text>
-          )}
           {settings ? (
-            <Box flexDirection="column" gap={1}>
-              {Input && isCsv ? (
-                <Box flexDirection="column">
-                  <Input
-                    key="sync-file"
-                    label={t.csvFile}
-                    placeholder={t.csvPlaceholder}
-                    value={settings.file}
-                    submitLabel={t.save}
-                    onSubmit={value => setSyncSettings($, { file: value.trim() })}
-                  />
-                  <Input
-                    key="sync-url"
-                    label={t.csvUrl}
-                    placeholder={w.urlPlaceholder}
-                    value={settings.url}
-                    submitLabel={t.save}
-                    onSubmit={value => setSyncSettings($, { url: value })}
-                  />
-                  {Select ? (
-                    <Select
-                      key="sync-format"
-                      label={t.textFormat}
-                      value={settings.textFormat ?? 'textile'}
-                      options={[
-                        { value: 'textile', label: 'Textile' },
-                        { value: 'markdown', label: 'Markdown' },
-                      ]}
-                      onSelect={value => setSyncSettings($, { textFormat: value === 'markdown' ? 'markdown' : 'textile' })}
-                    />
-                  ) : null}
-                </Box>
+            // Where it syncs with, how it went, and the button to sync now.
+            <Box flexDirection="column">
+              <Text>
+                <Text bold>{trackerName(settings.provider)}</Text>
+                <Text dimColor> · {where}</Text>
+              </Text>
+              <Text dimColor>{[...how, syncTime ? t.lastSync(syncTime) : t.notSynced].join(' · ')}</Text>
+              {!isCsv && !hasKey ? (
+                <Text color="warning">{needsEmail && jiraToken ? t.emailMissing : w.apiKeyMissing}</Text>
               ) : null}
-              {Input && Select && !isCsv ? (
+              {data.lastError ? <Text color="error">{data.lastError}</Text> : null}
+              {data.warnings.map(warning => (
+                <Text color="warning">{warning}</Text>
+              ))}
+              <Box flexDirection="row" flexWrap="wrap" gap={1} marginTop={1}>
+                <Button
+                  key="sync-now"
+                  variant="primary"
+                  label={synced.isSyncing ? t.syncing : t.syncNow}
+                  onPress={() => runSync($)}
+                />
+              </Box>
+            </Box>
+          ) : (
+            <Text dimColor>{t.noTrackerIntro}</Text>
+          )}
+          {settings && data.conflicts.length > 0 ? (
+            <Box flexDirection="column">
+              {heading(t.conflictsTitle)}
+              {data.conflicts.map((conflict, i) => (
                 <Box flexDirection="column">
-                  <Input
-                    key="sync-url"
-                    label={w.redmineUrl}
-                    placeholder={w.urlPlaceholder}
-                    value={settings.url}
-                    submitLabel={t.save}
-                    onSubmit={value => setSyncSettings($, { url: value })}
-                  />
-                  <Input
-                    key="sync-project"
-                    label={w.redmineProject}
-                    placeholder={w.projectPlaceholder}
-                    value={settings.project}
-                    submitLabel={t.save}
-                    onSubmit={value => setSyncSettings($, { project: isJira ? jira.projectKey(value) : value.trim() })}
-                  />
+                  <Text>{t.conflictLine(conflict.taskId, t.fieldNames[conflict.field] ?? conflict.field)}</Text>
+                  <Text dimColor>
+                    {isCsv ? t.inFile : w.inRedmine}: {conflict.remote?.trim() ? conflict.remote : t.empty}
+                  </Text>
+                  <Text dimColor>
+                    {t.inBacklog}: {conflict.local?.trim() ? conflict.local : t.empty}
+                  </Text>
+                  <Box flexDirection="row" flexWrap="wrap" gap={1}>
+                    <Button key={`conflict-remote-${i}`} label={isCsv ? t.useFile : w.useRemote} onPress={() => resolveConflict($, conflict, 'remote')} />
+                    <Button key={`conflict-local-${i}`} label={t.useLocal} onPress={() => resolveConflict($, conflict, 'local')} />
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          ) : null}
+          <Box flexDirection="column">
+            {heading(t.sectionSource)}
+            {Select ? (
+              <Select
+                key="sync-tracker"
+                label={t.tracker}
+                value={settings?.provider ?? 'none'}
+                options={[
+                  { value: 'none', label: t.noTracker },
+                  { value: 'redmine', label: t.trackerRedmine },
+                  { value: 'jira', label: t.trackerJira },
+                  { value: 'csv', label: t.trackerCsv },
+                ]}
+                onSelect={value => setTracker($, value)}
+              />
+            ) : (
+              <Text>
+                {t.tracker}: {trackerName(settings?.provider)}
+              </Text>
+            )}
+            {settings && Input && isCsv ? (
+              <Box flexDirection="column">
+                <Input
+                  key="sync-file"
+                  label={t.csvFile}
+                  placeholder={t.csvPlaceholder}
+                  value={settings.file}
+                  submitLabel={t.save}
+                  onSubmit={value => setSyncSettings($, { file: value.trim() })}
+                />
+                {hint(t.csvHow)}
+                <Input
+                  key="sync-url"
+                  label={t.csvUrl}
+                  value={settings.url}
+                  submitLabel={t.save}
+                  onSubmit={value => setSyncSettings($, { url: value })}
+                />
+                {hint(t.csvUrlHint)}
+              </Box>
+            ) : null}
+            {settings && Input && !isCsv ? (
+              <Box flexDirection="column">
+                <Input
+                  key="sync-url"
+                  label={w.redmineUrl}
+                  placeholder={w.urlPlaceholder}
+                  value={settings.url}
+                  submitLabel={t.save}
+                  onSubmit={value => setSyncSettings($, { url: value })}
+                />
+                <Input
+                  key="sync-project"
+                  label={w.redmineProject}
+                  placeholder={w.projectPlaceholder}
+                  value={settings.project}
+                  submitLabel={t.save}
+                  onSubmit={value => setSyncSettings($, { project: isJira ? jira.projectKey(value) : value.trim() })}
+                />
+              </Box>
+            ) : null}
+            {settings && !isCsv && hasKey ? <Text dimColor>{w.apiKeySet}</Text> : null}
+          </Box>
+          {settings && Select ? (
+            <Box flexDirection="column">
+              {heading(t.sectionHow)}
+              {isCsv ? hint(t.csvReadOnly) : null}
+              {!isCsv ? (
+                <Box flexDirection="column">
                   <Select
                     key="sync-mode"
                     label={t.mode}
@@ -1718,6 +1815,7 @@ export const register: Register = (on, options) => {
                     ]}
                     onSelect={value => setSyncSettings($, { mode: value === 'both' ? 'both' : 'read' })}
                   />
+                  {hint(settings.mode === 'both' ? w.modeBothHint : w.modeReadHint)}
                   <Select
                     key="sync-scope"
                     label={t.scope}
@@ -1738,96 +1836,32 @@ export const register: Register = (on, options) => {
                     ]}
                     onSelect={value => setSyncSettings($, { intervalMin: Number(value) })}
                   />
-                  {!isJira ? (
-                    <Select
-                      key="sync-format"
-                      label={t.textFormat}
-                      value={settings.textFormat ?? 'textile'}
-                      options={[
-                        { value: 'textile', label: 'Textile' },
-                        { value: 'markdown', label: 'Markdown' },
-                      ]}
-                      onSelect={value => setSyncSettings($, { textFormat: value === 'markdown' ? 'markdown' : 'textile' })}
-                    />
-                  ) : null}
-                  {isJira && settings.mode === 'both' && (data.issueTypes ?? []).length > 0 ? (
-                    <Select
-                      key="sync-issue-type"
-                      label={t.issueType}
-                      value={settings.issueType ?? ''}
-                      options={[
-                        { value: '', label: t.issueTypeAuto },
-                        ...(data.issueTypes ?? []).map(type => ({ value: type.id, label: type.name })),
-                      ]}
-                      onSelect={value => setSyncSettings($, { issueType: value })}
-                    />
-                  ) : null}
+                  {hint(t.intervalHint)}
                 </Box>
               ) : null}
-              {Select ? (
+              {formatSelect}
+              <Select
+                key="sync-structure"
+                label={t.structure}
+                value={settings.structure === false ? 'off' : 'on'}
+                options={[
+                  { value: 'on', label: t.structureOn },
+                  { value: 'off', label: t.structureOff },
+                ]}
+                onSelect={value => setSyncSettings($, { structure: value === 'on' })}
+              />
+              {hint(t.structureHint)}
+              {isJira && settings.mode === 'both' && (data.issueTypes ?? []).length > 0 ? (
                 <Select
-                  key="sync-structure"
-                  label={t.structure}
-                  value={settings.structure === false ? 'off' : 'on'}
+                  key="sync-issue-type"
+                  label={t.issueType}
+                  value={settings.issueType ?? ''}
                   options={[
-                    { value: 'on', label: t.structureOn },
-                    { value: 'off', label: t.structureOff },
+                    { value: '', label: t.issueTypeAuto },
+                    ...(data.issueTypes ?? []).map(type => ({ value: type.id, label: type.name })),
                   ]}
-                  onSelect={value => setSyncSettings($, { structure: value === 'on' })}
+                  onSelect={value => setSyncSettings($, { issueType: value })}
                 />
-              ) : null}
-              {isCsv ? (
-                <Text dimColor>
-                  {settings.file || '—'} · {t.readOnlyShort} · {t.manualOnly}
-                </Text>
-              ) : (
-                <Text dimColor>
-                  {settings.url || '—'} · {settings.project || '—'} · {settings.mode === 'both' ? t.bothShort : t.readOnlyShort}
-                  {settings.onlyMine ? ` · ${t.mineShort}` : ''}
-                </Text>
-              )}
-              {isCsv ? (
-                <Text dimColor>{t.csvHow}</Text>
-              ) : (
-                <Text dimColor={hasKey} color={hasKey ? undefined : 'warning'}>
-                  {hasKey ? w.apiKeySet : needsEmail && jiraToken ? t.emailMissing : w.apiKeyMissing}
-                </Text>
-              )}
-              <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                <Button
-                  key="sync-now"
-                  variant="primary"
-                  label={synced.isSyncing ? t.syncing : t.syncNow}
-                  onPress={() => runSync($)}
-                />
-                <Button key="sync-remove" label={t.disconnect} onPress={() => setTracker($, 'none')} />
-              </Box>
-              <Text dimColor>{syncTime ? t.lastSync(syncTime) : t.notSynced}</Text>
-              {data.lastError ? <Text color="error">{data.lastError}</Text> : null}
-              {data.warnings.map(warning => (
-                <Text color="warning">{warning}</Text>
-              ))}
-              {data.conflicts.length > 0 ? (
-                <Box flexDirection="column">
-                  <Text bold color="warning">
-                    {t.conflictsTitle}
-                  </Text>
-                  {data.conflicts.map((conflict, i) => (
-                    <Box flexDirection="column">
-                      <Text>{t.conflictLine(conflict.taskId, t.fieldNames[conflict.field] ?? conflict.field)}</Text>
-                      <Text dimColor>
-                        {isCsv ? t.inFile : w.inRedmine}: {conflict.remote?.trim() ? conflict.remote : t.empty}
-                      </Text>
-                      <Text dimColor>
-                        {t.inBacklog}: {conflict.local?.trim() ? conflict.local : t.empty}
-                      </Text>
-                      <Box flexDirection="row" flexWrap="wrap" gap={1}>
-                        <Button key={`conflict-remote-${i}`} label={isCsv ? t.useFile : w.useRemote} onPress={() => resolveConflict($, conflict, 'remote')} />
-                        <Button key={`conflict-local-${i}`} label={t.useLocal} onPress={() => resolveConflict($, conflict, 'local')} />
-                      </Box>
-                    </Box>
-                  ))}
-                </Box>
               ) : null}
               {settings.mode === 'both' && settings.excluded.length > 0 ? (
                 <Box flexDirection="row" flexWrap="wrap" gap={1}>
@@ -1835,43 +1869,55 @@ export const register: Register = (on, options) => {
                   <Button key="sync-include-old" plain label={t.includeOld} onPress={() => setSyncSettings($, { excluded: [] })} />
                 </Box>
               ) : null}
-              {Select && data.statuses.length > 0 ? (
-                <Box flexDirection="column">
-                  <Text bold>{w.statusMapping}</Text>
-                  {data.statuses.map(status => (
-                    <Select
-                      key={`sync-status-${status.id}`}
-                      label={status.name}
-                      value={settings.statusMap[String(status.id)] ?? order[0] ?? ''}
-                      options={order.map(one => ({ value: one, label: one }))}
-                      onSelect={value =>
-                        setSyncSettings($, { statusMap: { ...settings.statusMap, [String(status.id)]: value } })
-                      }
-                    />
-                  ))}
-                </Box>
-              ) : null}
-              {Select && data.priorities.length > 0 ? (
-                <Box flexDirection="column">
-                  <Text bold>{w.priorityMapping}</Text>
-                  {data.priorities.map(priority => (
-                    <Select
-                      key={`sync-priority-${priority.id}`}
-                      label={priority.name}
-                      value={settings.priorityMap[String(priority.id)] ?? ''}
-                      options={[
-                        { value: '', label: t.leaveAlone },
-                        ...levels.map(one => ({ value: one, label: t.priorityName[one.toLowerCase()] ?? one })),
-                      ]}
-                      onSelect={value =>
-                        setSyncSettings($, { priorityMap: { ...settings.priorityMap, [String(priority.id)]: value } })
-                      }
-                    />
-                  ))}
-                </Box>
-              ) : null}
-              {data.statuses.length === 0 ? <Text dimColor>{t.mappingLater}</Text> : null}
-              <Text dimColor>{isCsv ? t.csvNote : w.syncNote}</Text>
+            </Box>
+          ) : null}
+          {settings && Select && data.statuses.length > 0 ? (
+            <Box flexDirection="column">
+              {heading(isCsv ? t.statusMappingCsv : w.statusMapping)}
+              {data.statuses.map(status => (
+                <Select
+                  key={`sync-status-${status.id}`}
+                  label={status.name}
+                  value={settings.statusMap[String(status.id)] ?? order[0] ?? ''}
+                  options={order.map(one => ({ value: one, label: one }))}
+                  onSelect={value => setSyncSettings($, { statusMap: { ...settings.statusMap, [String(status.id)]: value } })}
+                />
+              ))}
+            </Box>
+          ) : null}
+          {settings && Select && data.priorities.length > 0 ? (
+            <Box flexDirection="column">
+              {heading(isCsv ? t.priorityMappingCsv : w.priorityMapping)}
+              {data.priorities.map(priority => (
+                <Select
+                  key={`sync-priority-${priority.id}`}
+                  label={priority.name}
+                  value={settings.priorityMap[String(priority.id)] ?? ''}
+                  options={[
+                    { value: '', label: t.leaveAlone },
+                    ...levels.map(one => ({ value: one, label: t.priorityName[one.toLowerCase()] ?? one })),
+                  ]}
+                  onSelect={value => setSyncSettings($, { priorityMap: { ...settings.priorityMap, [String(priority.id)]: value } })}
+                />
+              ))}
+            </Box>
+          ) : null}
+          {settings && data.statuses.length === 0 ? <Text dimColor>{t.mappingLater}</Text> : null}
+          {settings ? (
+            <Box flexDirection="column">
+              <Button
+                key="sync-help"
+                plain
+                dimColor
+                label={`${isHelpOpen ? '▾' : '▸'} ${t.howItWorks}`}
+                onPress={() => update($, isSyncHelpOpen, now => !now)}
+              />
+              {isHelpOpen ? <Text dimColor>{isCsv ? t.csvNote : w.syncNote}</Text> : null}
+            </Box>
+          ) : null}
+          {settings ? (
+            <Box flexDirection="row">
+              <Button key="sync-remove" label={t.disconnect} onPress={() => setTracker($, 'none')} />
             </Box>
           ) : null}
         </Box>
@@ -2008,6 +2054,21 @@ export const register: Register = (on, options) => {
       const now = await read($, editing)
       const stopEditing = () => update($, editing, () => null)
 
+      // Where the task comes from: its issue, its type and its parent task.
+      const all = await read($, tasks)
+      const linked = synced.settings ? Object.entries(synced.data.links).find(([, link]) => link.taskId === id) : undefined
+      const provider = synced.settings?.provider
+      const trackerLabel = provider === 'jira' ? 'Jira' : 'Redmine'
+      const parentId = summary?.parentTaskId ?? null
+      const parentTitle = parentId ? all.find(one => one.id === parentId)?.title : undefined
+      const origin = [
+        ...(linked ? [`${trackerLabel} ${provider === 'jira' ? linked[0] : `#${linked[0]}`}`] : []),
+        ...(linked?.[1].type ? [linked[1].type] : []),
+        ...(parentId ? [t.insideOf(parentId, parentTitle)] : []),
+      ]
+      const isReadOnly = provider === 'csv' || synced.settings?.mode !== 'both'
+      const otherLabels = (summary?.labels ?? []).filter(label => label !== linked?.[1].type)
+
       // Priorities: the configured ones, the task's own if the config lacks
       // it. A priority once set cannot be cleared through the CLI, so "None"
       // is offered only while the task has none.
@@ -2023,8 +2084,8 @@ export const register: Register = (on, options) => {
 
       const criteria = task ? (
         <Box flexDirection="column">
-          <Text bold>{t.criteria}</Text>
-          {task.acceptanceCriteria.length === 0 ? <Text dimColor>{t.none}</Text> : null}
+          {ruled(t.criteria)}
+          {task.acceptanceCriteria.length === 0 ? <Text dimColor>{t.noneYet}</Text> : null}
           {task.acceptanceCriteria.map(item => {
             if (Input && now === `criterion:${item.index}`) {
               return (
@@ -2083,14 +2144,22 @@ export const register: Register = (on, options) => {
               </Box>
             )
           })}
-          {Input ? (
-            <Input
-              key="criterion-new"
-              placeholder={t.newCriterion}
-              submitLabel={t.add}
-              value=""
-              onSubmit={value => addCriterion($, id, value)}
-            />
+          {Input && now === 'criterion:new' ? (
+            <Box flexDirection="row" gap={1}>
+              <Input
+                key="criterion-new"
+                autoFocus
+                placeholder={t.newCriterion}
+                submitLabel={t.add}
+                value=""
+                onSubmit={value => addCriterion($, id, value)}
+              />
+              <Button key="criterion-new-cancel" label={t.cancel} onPress={stopEditing} />
+            </Box>
+          ) : Input ? (
+            <Box flexDirection="row">
+              <Button key="criterion-add" plain label={t.addCriterion} onPress={() => update($, editing, () => 'criterion:new')} />
+            </Box>
           ) : null}
         </Box>
       ) : null
@@ -2102,6 +2171,13 @@ export const register: Register = (on, options) => {
             <Text dimColor>{id}</Text>
             <Text color={color}>{status}</Text>
           </Box>
+          {origin.length > 0 || otherLabels.length > 0 ? (
+            <Box flexDirection="column">
+              {origin.length > 0 ? <Text dimColor>{origin.join(' · ')}</Text> : null}
+              {otherLabels.length > 0 ? <Text dimColor>{t.labelsLine(otherLabels.join(', '))}</Text> : null}
+              {linked ? <Text dimColor>{isReadOnly ? t.readOnlyHint(trackerLabel) : t.bothWaysHint(trackerLabel)}</Text> : null}
+            </Box>
+          ) : null}
           {Input ? (
             <Input key="title" label={t.title} value={title} submitLabel={t.save} onSubmit={value => rename($, id, value)} />
           ) : (
@@ -2111,13 +2187,26 @@ export const register: Register = (on, options) => {
             </Text>
           )}
           {Select ? (
-            <Select
-              key="status"
-              label={t.status}
-              value={status}
-              options={choices.map(one => ({ value: one, label: one }))}
-              onSelect={value => (value !== status ? setStatus($, id, value) : undefined)}
-            />
+            <Box flexDirection="row" flexWrap="wrap" gap={1}>
+              {around.previous ? (
+                <Button
+                  key="status-prev"
+                  hotkey="h"
+                  label={`◀ ${around.previous}`}
+                  onPress={() => setStatus($, id, around.previous ?? status)}
+                />
+              ) : null}
+              <Select
+                key="status"
+                label={t.status}
+                value={status}
+                options={choices.map(one => ({ value: one, label: one }))}
+                onSelect={value => (value !== status ? setStatus($, id, value) : undefined)}
+              />
+              {around.next ? (
+                <Button key="status-next" hotkey="l" label={`${around.next} ▶`} onPress={() => setStatus($, id, around.next ?? status)} />
+              ) : null}
+            </Box>
           ) : (
             <Box flexDirection="row" flexWrap="wrap" gap={1}>
               {choices.map((one, i) => (
@@ -2125,7 +2214,7 @@ export const register: Register = (on, options) => {
               ))}
             </Box>
           )}
-          {around.previous || around.next ? (
+          {!Select && (around.previous || around.next) ? (
             <Box flexDirection="row" gap={1}>
               {around.previous ? (
                 <Button

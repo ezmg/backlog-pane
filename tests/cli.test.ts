@@ -31,6 +31,7 @@ const task = (id: string, status: string, updatedAt: string | null = null): Task
   status,
   priority: null,
   labels: [],
+  parentTaskId: null,
   references: [],
   acceptanceCriteriaCompleted: 0,
   acceptanceCriteriaCount: 0,

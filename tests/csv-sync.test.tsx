@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { CWD, PANE, open, world } from './fixtures'
+import { CWD, PANE, open, openTask, world } from './fixtures'
 import type { FakeTask } from './fixtures'
 
 // The CSV tracker, end to end: a Redmine export on disk, read when the
@@ -51,11 +51,14 @@ test('set up in the pane: pick the CSV tracker and its file, then sync', async (
   // No mode, issues or interval to pick: read only, with the button.
   expect(await ui.find({ key: 'sync-mode' })).toBe(undefined)
   expect(await ui.find({ key: 'sync-interval' })).toBe(undefined)
-  expect(await ui.find({ type: 'Text', text: /^In Redmine: Issues, filter them/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /In Redmine: Issues → CSV/ })).toBeDefined()
   await ui.press({ key: 'sync-now' })
   expect(await ui.find({ type: 'Text', text: 'Type the path of the CSV file Redmine exported.' })).toBeDefined()
   await ui.input({ key: 'sync-file', text: ` ${FILE} ` })
-  expect(await ui.find({ type: 'Text', text: `${FILE} · read only · Only with the button` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^read only · Only with the button/ })).toBeDefined()
+  // The file by its name at the top; its whole path in its field.
+  expect(await ui.find({ type: 'Text', text: ' · issues.csv' })).toBeDefined()
+  expect((await ui.find({ key: 'sync-file' }))?.props.value).toBe(FILE)
   await ui.press({ key: 'sync-now' })
 
   expect(tasks.map(task => [task.title, task.status, task.priority, task.references])).toEqual([
@@ -248,5 +251,27 @@ test('a Redmine that keeps Markdown: descriptions are not converted', async ($, 
   expect((await ui.find({ key: 'sync-format' }))?.props.value).toBe('markdown')
   await ui.press({ key: 'sync-now' })
   expect(tasks[0]?.description).toBe('# Title\n*it*')
+  await ui.unmount()
+})
+
+test('the task says where it comes from; the integration’s help folds', async ($, on) => {
+  const lines = ['#;Tipo;Tarea padre;Estado;Asunto', '20;Historia de usuario;;Nueva;Status', '31;Tarea;20;Nueva;[iOS] Status']
+  const { clock, tasks, files } = world(on, { isStateful: true, tasks: [], store: settings() })
+  files.set(FILE, csv(lines))
+  await open($, clock)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await ui.press({ key: 'sync-open' })
+  expect(await ui.find({ type: 'Text', text: /^The file’s issues are copied/ })).toBe(undefined)
+  await ui.press({ key: 'sync-help' })
+  expect(await ui.find({ type: 'Text', text: /^The file’s issues are copied/ })).toBeDefined()
+  await ui.press({ key: 'sync-now' })
+  await ui.press({ key: 'sync-back' })
+  await clock.advance(2_000)
+  const child = tasks.find(task => task.title === '[iOS] Status') as FakeTask
+  const parent = tasks.find(task => task.title === 'Status') as FakeTask
+  await openTask(ui, child.id)
+  expect(await ui.find({ type: 'Text', text: `Redmine #31 · Tarea · inside ${parent.id} “Status”` })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Read only: what you change here is not sent to Redmine.' })).toBeDefined()
+  expect(await ui.find({ key: 'status-next' })).toBeDefined()
   await ui.unmount()
 })

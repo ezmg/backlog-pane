@@ -38,10 +38,14 @@ for you**.
 - **New task.** **+ New task** opens a title field. **Cancel** closes it, and it closes by
   itself once the task is created.
 - **Move a task.** In the task view, **◀ previous status** and **next status ▶** (keys `h`
-  and `l`) move it one step, on every surface. The status picker jumps anywhere.
+  and `l`), on either side of the status picker, move it one step, on every surface. The
+  picker jumps anywhere.
+- **Where a task comes from.** A synced task shows its issue (*Redmine #44801*, *Jira
+  APP-12*), its type, the task it is a subtask of, and whether what you change there is
+  sent to the tracker.
 - **Edit a task.** Title, priority (from `backlog config get priorities`, else
-  High/Medium/Low), and acceptance criteria. You can tick, add, edit, and delete criteria;
-  delete asks first.
+  High/Medium/Low), and acceptance criteria. You can tick, add (**+ Add criterion**), edit,
+  and delete criteria; delete asks first.
 - **Long text.** Edit the description and the implementation plan in a field of several
   lines (Claude Code 2.1.301 and later), or in your own editor on older versions (see
   [Editing long text](#editing-long-text)).

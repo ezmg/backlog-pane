@@ -40,11 +40,14 @@ del prompt. El prompt **nunca se envía por ti**.
 - **Nueva tarea.** **+ Nueva tarea** abre un campo para el título. **Cancelar** lo cierra,
   y se cierra solo cuando la tarea se ha creado.
 - **Mover una tarea.** En la vista de la tarea, **◀ estado anterior** y **estado
-  siguiente ▶** (teclas `h` y `l`) la mueven un paso, en todas las superficies. El selector
-  de estado salta a cualquiera.
+  siguiente ▶** (teclas `h` y `l`), a los lados del selector de estado, la mueven un paso, en
+  todas las superficies. El selector salta a cualquiera.
+- **De dónde viene una tarea.** Una tarea sincronizada muestra su petición (*Redmine
+  #44801*, *Jira APP-12*), su tipo, la tarea de la que es subtarea, y si lo que cambies en
+  ella se envía al gestor.
 - **Editar una tarea.** Título, prioridad (de `backlog config get priorities`, si no
-  Alta/Media/Baja) y criterios de aceptación. Puedes marcar, añadir, editar y eliminar
-  criterios; eliminar pide confirmación antes.
+  Alta/Media/Baja) y criterios de aceptación. Puedes marcar, añadir (**+ Añadir
+  criterio**), editar y eliminar criterios; eliminar pide confirmación antes.
 - **Textos largos.** Edita la descripción y el plan de implementación en un campo de varias
   líneas (Claude Code 2.1.301 o posterior), o en tu propio editor en versiones anteriores
   (ver [Editar textos largos](#editar-textos-largos)).

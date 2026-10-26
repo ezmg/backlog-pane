@@ -276,6 +276,7 @@ const task = (id: string, status: string): TaskSummary => ({
   status,
   priority: null,
   labels: [],
+  parentTaskId: null,
   references: [],
   acceptanceCriteriaCompleted: 0,
   acceptanceCriteriaCount: 0,

@@ -10,6 +10,8 @@ export type TaskSummary = {
   status: string
   priority: string | null
   labels: string[]
+  /** The task it is a subtask of, if any. */
+  parentTaskId: string | null
   /** Its references: URLs or paths; a synced task holds its issue's URL here. */
   references: string[]
   acceptanceCriteriaCompleted: number
@@ -166,6 +168,7 @@ declare module 'claude-code' {
       prefsKey: string | null
       sync: SyncView
       isManagingSync: boolean
+      isSyncHelpOpen: boolean
     }
   }
 }
