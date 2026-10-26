@@ -192,6 +192,7 @@ export function readSyncStore(value: unknown): { settings: SyncSettings | null; 
           project: typeof s.project === 'string' ? s.project : '',
           file: typeof s.file === 'string' ? s.file : '',
           issueType: typeof s.issueType === 'string' ? s.issueType : '',
+          textFormat: s.textFormat === 'markdown' ? 'markdown' : 'textile',
           mode: s.mode === 'both' ? 'both' : 'read',
           onlyMine: s.onlyMine === true,
           view: s.view === 'mine' ? 'mine' : 'all',

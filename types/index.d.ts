@@ -103,6 +103,8 @@ export type SyncSettings = {
   file: string
   /** Jira: the issue type new tasks are created as (its id); '' picks Task, or the first. */
   issueType?: string
+  /** Redmine and its CSV: the descriptions' format there; Textile is converted to Markdown and back. */
+  textFormat?: 'textile' | 'markdown'
   mode: SyncMode
   /** Only the issues assigned to the key's owner; new tasks sent to Redmine are assigned to them. */
   onlyMine: boolean

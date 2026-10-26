@@ -39,6 +39,7 @@ import {
 } from './cli'
 import { detectLanguage, strings, wordsFor } from './i18n'
 import * as jira from './jira'
+import { markdownToTextile, textileToMarkdown } from './textile'
 import {
   PAGE,
   defaultPriorityMap,
@@ -381,6 +382,13 @@ async function applyLocal(
   return false
 }
 
+/** A description as Backlog.md keeps it (Markdown), from Redmine's format, and back. */
+const fromRedmineText = (settings: SyncSettings, text: string) => (settings.textFormat === 'markdown' ? text : textileToMarkdown(text))
+const toRedmineText = (settings: SyncSettings, change: Change): Change =>
+  change.description === undefined || change.description === null || settings.textFormat === 'markdown'
+    ? change
+    : { ...change, description: markdownToTextile(change.description) }
+
 /** One request to Jira with the token; a request that cannot go out is status 0. */
 async function jiraCall($: Engine, base: string, method: string, url: string, body?: unknown): Promise<Http> {
   try {
@@ -608,7 +616,9 @@ async function syncCsv($: Engine, settings: SyncSettings, base: string | undefin
   const priorityMap = { ...defaultPriorityMap(remotePriorities, levels), ...settings.priorityMap }
 
   const data = (await read($, sync)).data
-  const remote = file.rows.map(row => toRemoteRow(base, row, file.skip, statusMap, priorityMap, order[0] ?? ''))
+  const remote = file.rows.map(row =>
+    toRemoteRow(base, { ...row, description: fromRedmineText(settings, row.description) }, file.skip, statusMap, priorityMap, order[0] ?? ''),
+  )
   const local = await readLocal($, data, new Set(remote.map(item => item.url)))
   if (typeof local === 'string') return local || t.listFailed
   const planned = plan({
@@ -677,7 +687,9 @@ async function syncOnce($: Engine, settings: SyncSettings, base: string, t: Stri
   if (typeof local === 'string') return local || t.listFailed
 
   const fallback = order[0] ?? ''
-  const remote = issues.map(issue => toRemoteItem(base, issue, statusMap, priorityMap, fallback))
+  const remote = issues.map(issue =>
+    toRemoteItem(base, { ...issue, description: fromRedmineText(settings, issue.description) }, statusMap, priorityMap, fallback),
+  )
   const planned = plan({
     remote,
     local,
@@ -709,7 +721,7 @@ async function syncOnce($: Engine, settings: SyncSettings, base: string, t: Stri
     if (action.kind === 'create-local' || action.kind === 'update-local') {
       if (await applyLocal($, action, links, data, warnings, t)) fromRemote++
     } else if (action.kind === 'update-remote') {
-      const body = issueBody(action.change, maps, lists, meta[action.key])
+      const body = issueBody(toRedmineText(settings, action.change), maps, lists, meta[action.key])
       const old = data.links[action.key]?.base
       const link = links[action.key]
       for (const field of body.skipped) {
@@ -732,7 +744,7 @@ async function syncOnce($: Engine, settings: SyncSettings, base: string, t: Stri
       const run = await backlog($, args.view(action.taskId))
       const detail = run.ok ? readTaskView(safeParse(run.stdout)) : undefined
       const fields = { ...action.fields, description: detail?.description ?? '' }
-      const body = issueBody(fields, maps, lists)
+      const body = issueBody(toRedmineText(settings, fields), maps, lists)
       const answer = await redmineCall($, 'POST', redmineUrls.create(base), {
         issue: { project_id: project, ...body.issue, ...(settings.onlyMine && me !== undefined ? { assigned_to_id: me } : {}) },
       })
@@ -818,7 +830,7 @@ async function resolveConflict($: Engine, conflict: SyncConflict, side: 'remote'
     }
   } else if (!isCsv && base) {
     const body = issueBody(
-      { [conflict.field]: value ?? '' },
+      toRedmineText(settings, { [conflict.field]: value ?? '' }),
       { status: settings.statusMap, priority: settings.priorityMap },
       { statuses: view.data.statuses, priorities: view.data.priorities },
       view.data.meta[conflict.key],
@@ -1625,6 +1637,18 @@ export const register: Register = (on, options) => {
                     submitLabel={t.save}
                     onSubmit={value => setSyncSettings($, { url: value })}
                   />
+                  {Select ? (
+                    <Select
+                      key="sync-format"
+                      label={t.textFormat}
+                      value={settings.textFormat ?? 'textile'}
+                      options={[
+                        { value: 'textile', label: 'Textile' },
+                        { value: 'markdown', label: 'Markdown' },
+                      ]}
+                      onSelect={value => setSyncSettings($, { textFormat: value === 'markdown' ? 'markdown' : 'textile' })}
+                    />
+                  ) : null}
                 </Box>
               ) : null}
               {Input && Select && !isCsv ? (
@@ -1675,6 +1699,18 @@ export const register: Register = (on, options) => {
                     ]}
                     onSelect={value => setSyncSettings($, { intervalMin: Number(value) })}
                   />
+                  {!isJira ? (
+                    <Select
+                      key="sync-format"
+                      label={t.textFormat}
+                      value={settings.textFormat ?? 'textile'}
+                      options={[
+                        { value: 'textile', label: 'Textile' },
+                        { value: 'markdown', label: 'Markdown' },
+                      ]}
+                      onSelect={value => setSyncSettings($, { textFormat: value === 'markdown' ? 'markdown' : 'textile' })}
+                    />
+                  ) : null}
                   {isJira && settings.mode === 'both' && (data.issueTypes ?? []).length > 0 ? (
                     <Select
                       key="sync-issue-type"
