@@ -43,6 +43,10 @@ export type BoardCard = {
   isHigh: boolean
   /** Its acceptance criteria done, as `1/2`; null when it has none. */
   criteria: string | null
+  /** Its labels, joined (`Historia de usuario, ios`); null when it has none: a line of its own. */
+  labels: string | null
+  /** Whether it hangs from another task: its id line starts with `↳`. */
+  isSubtask: boolean
 }
 
 /** One column of the board: a status, its theme colour and its cards. */

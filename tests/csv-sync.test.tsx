@@ -269,6 +269,11 @@ test('the task says where it comes from; the integration’s help folds', async 
   await clock.advance(2_000)
   const child = tasks.find(task => task.title === '[iOS] Status') as FakeTask
   const parent = tasks.find(task => task.title === 'Status') as FakeTask
+  // On the board: the labels on a line of their own, an arrow before a subtask's id.
+  expect(await ui.find({ type: 'Text', text: /^Historia de u/, in: 'board' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Tarea', in: 'board' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `↳ ${child.id}`, in: 'board' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: parent.id, in: 'board' })).toBeDefined()
   await openTask(ui, child.id)
   expect(await ui.find({ type: 'Text', text: `Redmine #31 · Tarea · inside ${parent.id} “Status”` })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Read only: what you change here is not sent to Redmine.' })).toBeDefined()

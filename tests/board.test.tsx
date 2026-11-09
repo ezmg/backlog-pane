@@ -331,7 +331,7 @@ test('Spanish: the board hint', { options: { language: 'es' } }, async ($, on) =
 })
 
 describe('board layout', () => {
-  const card = (id: string, title: string, isHigh = false) => ({ id, title, isHigh, criteria: null })
+  const card = (id: string, title: string, isHigh = false) => ({ id, title, isHigh, criteria: null, labels: null as string | null, isSubtask: false })
   const props: BoardProps = {
     columns: [
       { status: 'To Do', color: 'suggestion', total: 2, isClosed: false, cards: [card('A-1', 'a'), card('A-2', 'b', true)] },
@@ -352,6 +352,12 @@ describe('board layout', () => {
     // Chip, blank, two cards of four rows (border, title, id, border), a slot of three.
     expect(columnHeight(props)).toBe(13)
     expect(columnHeight({ ...props, columns: [] })).toBe(5)
+    // A card with labels has one row more, and the cards under it start lower.
+    const labelled = { ...card('A-0', 'x'), labels: 'Epic, ios' }
+    const tall: BoardProps = { ...props, columns: [{ ...props.columns[0]!, cards: [labelled, card('A-1', 'a')] }] }
+    expect(columnHeight(tall)).toBe(14)
+    expect(hit(tall, 20, 3, 6)?.card).toBe(labelled)
+    expect(hit(tall, 20, 3, 7)?.card?.id).toBe('A-1')
   })
 
   test('a cell maps to a column and a card', async () => {
@@ -385,6 +391,10 @@ describe('board layout', () => {
     expect(cardLine('TASK-12', '0/2', 11)).toBe('TASK-12 0/2')
     expect(cardLine('TASK-123', '10/12', 11)).toBe('TASK… 10/12')
     expect(cardLine('TASK-123', null, 6)).toBe('TASK-…')
+    // A subtask's line starts with an arrow, dropped where there is no room.
+    expect(cardLine('TASK-2.1', '1/2', 20, true)).toBe('↳ TASK-2.1 · 1/2')
+    expect(cardLine('TASK-2.1', null, 10, true)).toBe('↳ TASK-2.1')
+    expect(cardLine('TASK-2.1', null, 9, true)).toBe('TASK-2.1')
   })
 
   test('long titles are cut with an ellipsis', async () => {

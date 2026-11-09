@@ -2345,7 +2345,9 @@ export const register: Register = (on, options) => {
               const rows = group.tasks.map(task => (
                 <Button key={`task:${task.id}`} plain onPress={() => select($, task.id)}>
                   {isHighPriority(task.priority) ? <Text color="error">! </Text> : ''}
+                  {task.parentTaskId ? '↳ ' : ''}
                   {task.id} {task.title}
+                  {task.labels.length > 0 ? <Text dimColor> · {task.labels.join(', ')}</Text> : ''}
                   {task.acceptanceCriteriaCount > 0 ? (
                     <Text dimColor>
                       {' '}
@@ -2405,6 +2407,8 @@ function board(groups: ReturnType<typeof groupTasks>, width: number, t: Strings)
           task.acceptanceCriteriaCount > 0
             ? `${task.acceptanceCriteriaCompleted}/${task.acceptanceCriteriaCount}`
             : null,
+        labels: task.labels.length > 0 ? task.labels.join(', ') : null,
+        isSubtask: task.parentTaskId !== null,
       })),
     })),
     width,

@@ -8,7 +8,8 @@
 // status's colour) and row 1 is blank; then each card is a rounded box in
 // that colour, so a card moved to another column takes that column's
 // colour: its border, its title (one line, or two when it does not fit),
-// its id and criteria, its border. A dashed slot under the cards of the
+// its labels if it has any, its id (after an arrow for a subtask) and
+// criteria, its border. A dashed slot under the cards of the
 // column a card is dragged over marks where it will land.
 //
 // Clicking a card selects it; clicking it again opens it, and clicking
@@ -72,8 +73,8 @@ export function layout(props: BoardProps, width: number): Layout {
     let top = HEAD
     const placed = column.cards.map(card => {
       const lines = wrapTitle(card.title, inner - (card.isHigh ? 2 : 0))
-      // The border, the title, the id line, the border.
-      const rows = lines.length + 3
+      // The border, the title, the labels if any, the id line, the border.
+      const rows = lines.length + 3 + (card.labels ? 1 : 0)
       const one = { lines, top, rows }
       top += rows
       return one
@@ -124,7 +125,9 @@ export function nextOpenColumn(props: BoardProps, from: number, step: 1 | -1): n
  * (`BL-1 · 1/2`), closer together (`BL-1 1/2`) when that does not fit, and
  * cut only then; the count is what a narrow column must not lose.
  */
-export function cardLine(id: string, criteria: string | null, width: number): string {
+export function cardLine(id: string, criteria: string | null, width: number, isSubtask = false): string {
+  // A subtask's id line starts with an arrow, where there is room for it.
+  if (isSubtask && width >= id.length + 2) return `↳ ${cardLine(id, criteria, width - 2)}`
   if (!criteria) return fit(id, width)
   for (const line of [`${id} · ${criteria}`, `${id} ${criteria}`]) if (line.length <= width) return line
   return `${fit(id, Math.max(1, width - criteria.length - 1))} ${criteria}`
@@ -251,8 +254,13 @@ const Board: ClientModule<BoardProps, State> = (props, surface) => {
                         {line}
                       </Text>
                     ))}
+                    {card.labels ? (
+                      <Text inverse={isSelected} dimColor italic>
+                        {fit(card.labels, inner)}
+                      </Text>
+                    ) : null}
                     <Text inverse={isSelected} dimColor>
-                      {cardLine(card.id, card.criteria, inner)}
+                      {cardLine(card.id, card.criteria, inner, card.isSubtask)}
                     </Text>
                   </Box>
                 )

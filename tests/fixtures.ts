@@ -215,11 +215,13 @@ export function world(on: On, options: World = {}) {
   if (options.http) {
     const http = options.http
     on('http.fetch', (_, e) => {
-      const init = e.init ?? {}
+      // The mod sends text bodies only (from 2.1.321 a body may also be bytes).
+      const body = typeof e.init?.body === 'string' ? e.init.body : undefined
+      const init = { method: e.init?.method, headers: e.init?.headers as Record<string, string> | undefined, body }
       requests.push({
         method: init.method ?? 'GET',
         url: e.url,
-        body: init.body ? JSON.parse(init.body) : undefined,
+        body: body ? JSON.parse(body) : undefined,
         key: init.headers?.['X-Redmine-API-Key'],
         auth: init.headers?.Authorization,
       })
