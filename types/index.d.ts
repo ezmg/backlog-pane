@@ -45,7 +45,7 @@ export type BoardCard = {
   criteria: string | null
   /** Its labels, joined (`Historia de usuario, ios`); null when it has none: a line of its own. */
   labels: string | null
-  /** Whether it hangs from another task: its id line starts with `↳`. */
+  /** Whether it hangs from another task: its id line starts with `└`. */
   isSubtask: boolean
 }
 

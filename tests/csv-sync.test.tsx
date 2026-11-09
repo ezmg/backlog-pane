@@ -272,7 +272,7 @@ test('the task says where it comes from; the integration’s help folds', async 
   // On the board: the labels on a line of their own, an arrow before a subtask's id.
   expect(await ui.find({ type: 'Text', text: /^Historia de u/, in: 'board' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Tarea', in: 'board' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: `↳ ${child.id}`, in: 'board' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: `└ ${child.id}`, in: 'board' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: parent.id, in: 'board' })).toBeDefined()
   await openTask(ui, child.id)
   expect(await ui.find({ type: 'Text', text: `Redmine #31 · Tarea · inside ${parent.id} “Status”` })).toBeDefined()

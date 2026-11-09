@@ -392,8 +392,8 @@ describe('board layout', () => {
     expect(cardLine('TASK-123', '10/12', 11)).toBe('TASK… 10/12')
     expect(cardLine('TASK-123', null, 6)).toBe('TASK-…')
     // A subtask's line starts with an arrow, dropped where there is no room.
-    expect(cardLine('TASK-2.1', '1/2', 20, true)).toBe('↳ TASK-2.1 · 1/2')
-    expect(cardLine('TASK-2.1', null, 10, true)).toBe('↳ TASK-2.1')
+    expect(cardLine('TASK-2.1', '1/2', 20, true)).toBe('└ TASK-2.1 · 1/2')
+    expect(cardLine('TASK-2.1', null, 10, true)).toBe('└ TASK-2.1')
     expect(cardLine('TASK-2.1', null, 9, true)).toBe('TASK-2.1')
   })
 

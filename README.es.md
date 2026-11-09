@@ -23,7 +23,7 @@ del prompt. El prompt **nunca se envía por ti**.
 - **Tablero en vivo.** En la terminal y en la app de escritorio, una columna por estado en
   el orden de tu configuración, encabezada por el estado como una etiqueta de su color.
   Cada tarjeta es un recuadro con el borde del color de su estado, con su título (en dos
-  líneas si las necesita), sus etiquetas si las tiene, su ID (tras un `↳` si es una subtarea) y los criterios cumplidos; una tarjeta movida a otra
+  líneas si las necesita), sus etiquetas si las tiene, su ID (tras un `└` si es una subtarea) y los criterios cumplidos; una tarjeta movida a otra
   columna toma el color de esa columna. Arrastra una tarjeta a otra columna para moverla,
   o usa el teclado (ver [Atajos](#atajos)). El estado final (normalmente *Done*) muestra solo sus tareas más
   recientes. VS Code y el móvil muestran las mismas tareas como una lista agrupada por

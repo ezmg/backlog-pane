@@ -22,7 +22,7 @@ for you**.
 - **Live board.** On the terminal and the desktop app, one column per status in your
   configured order, headed by the status as a chip in its colour. Each card is a box
   bordered in its status's colour, with its title (on two lines if it needs them), its
-  labels if it has any, its ID (after a `↳` when it is a subtask) and its criteria done; a
+  labels if it has any, its ID (after a `└` when it is a subtask) and its criteria done; a
   card moved to another column takes that column's colour. Drag
   a card to another column to move it, or use the keyboard (see [Shortcuts](#shortcuts)). The final
   status (usually *Done*) shows only its most recent tasks. VS Code and mobile show the

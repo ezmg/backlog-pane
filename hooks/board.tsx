@@ -127,7 +127,7 @@ export function nextOpenColumn(props: BoardProps, from: number, step: 1 | -1): n
  */
 export function cardLine(id: string, criteria: string | null, width: number, isSubtask = false): string {
   // A subtask's id line starts with an arrow, where there is room for it.
-  if (isSubtask && width >= id.length + 2) return `↳ ${cardLine(id, criteria, width - 2)}`
+  if (isSubtask && width >= id.length + 2) return `└ ${cardLine(id, criteria, width - 2)}`
   if (!criteria) return fit(id, width)
   for (const line of [`${id} · ${criteria}`, `${id} ${criteria}`]) if (line.length <= width) return line
   return `${fit(id, Math.max(1, width - criteria.length - 1))} ${criteria}`

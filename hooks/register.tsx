@@ -2345,7 +2345,7 @@ export const register: Register = (on, options) => {
               const rows = group.tasks.map(task => (
                 <Button key={`task:${task.id}`} plain onPress={() => select($, task.id)}>
                   {isHighPriority(task.priority) ? <Text color="error">! </Text> : ''}
-                  {task.parentTaskId ? '↳ ' : ''}
+                  {task.parentTaskId ? '└ ' : ''}
                   {task.id} {task.title}
                   {task.labels.length > 0 ? <Text dimColor> · {task.labels.join(', ')}</Text> : ''}
                   {task.acceptanceCriteriaCount > 0 ? (
